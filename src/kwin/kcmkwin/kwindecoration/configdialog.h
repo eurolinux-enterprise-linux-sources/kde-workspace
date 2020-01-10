@@ -2,7 +2,7 @@
  KWin - the KDE window manager
  This file is part of the KDE project.
 
-Copyright (C) 2009 Martin Gräßlin <kde@martin-graesslin.com>
+Copyright (C) 2009 Martin Gräßlin <mgraesslin@kde.org>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -34,6 +34,9 @@ class KWinAuroraeConfigForm : public QWidget, public Ui::KWinAuroraeConfigForm
 
 public:
     explicit KWinAuroraeConfigForm(QWidget* parent);
+    void enableNoSideBorderSupport(bool enable);
+Q_SIGNALS:
+    void changed();
 };
 
 class KWinDecorationConfigForm : public QWidget, public Ui::KWinDecorationConfigForm

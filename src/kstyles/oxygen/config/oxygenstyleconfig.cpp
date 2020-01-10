@@ -1,5 +1,5 @@
 /*
-Copyright 2010 Hugo Pereira Da Costa <hugo@oxygen-icons.org>
+Copyright 2010 Hugo Pereira Da Costa <hugo.pereira@free.fr>
 Copyright 2009 Matthew Woehlke <mw.triad@users.sourceforge.net>
 Copyright 2009 Long Huynh Huu <long.upcase@googlemail.com>
 Copyright 2003 Sandro Giessl <ceebx@users.sourceforge.net>
@@ -71,7 +71,6 @@ namespace Oxygen
 
         // connections
         connect( _windowDragMode, SIGNAL(currentIndexChanged(int)), SLOT(windowDragModeChanged(int)) );
-        connect( _viewDrawTriangularExpander, SIGNAL(toggled(bool)), _viewTriangularExpanderSize, SLOT(setEnabled(bool)) );
         connect( _expertModeButton, SIGNAL(pressed()), SLOT(toggleExpertModeInternal()) );
 
         _expertModeButton->setIcon( KIcon("configure") );

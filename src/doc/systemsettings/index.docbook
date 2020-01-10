@@ -24,8 +24,8 @@
 </copyright>
 <legalnotice>&FDLNotice;</legalnotice>
 
-<date>2012-11-08</date>
-<releaseinfo>1.0 (&kde; 4.10)</releaseinfo>
+<date>2013-12-05</date>
+<releaseinfo>4.12 (&kde; 4.12)</releaseinfo>
 
 <abstract>
 <para>
@@ -132,12 +132,15 @@ Across the top is a toolbar. The toolbar provides the user with the ability to g
 You can also find a <guimenu>Help</guimenu> menu as well as a <guibutton>Configure</guibutton> button which provides you a dialog with alternate view settings.
 </para>
 <para>To search for something within all of the modules, start to type keywords into the search field at the right of the toolbar in the <guibutton>Overview</guibutton>. When you start typing, a list of matching topics will popup. Select one and only the groups with settings for this  keyword are enabled, the other are greyed out.</para>
-
+<para>When the icon window has the focus, you can type the first letter of 
+any module or module group name to select it. Typing this letter again the 
+selection moves to the next match.
+</para>
 <para>
-Underneath the toolbar is an icon view of the individual modules that 
+Underneath the toolbar is an icon view of the individual modules or module groups that 
 make up &systemsettings; grouped by different categories. By default, 
 if your mouse stays a few seconds over an icon, a detailed tooltip 
-appears, explaining the purpose of the module.
+appears, explaining the purpose of the module or the modules in this group.
 </para>
 </sect1>
 
@@ -151,7 +154,7 @@ appears, explaining the purpose of the module.
 <listitem>
 <para><itemizedlist>
 <listitem><para>
-Account Details (Password &amp; User Account, Paths, KDE Secret Sync, KDE Wallet, Social Desktop, Web Shortcuts)
+Account Details (Password &amp; User Account, Paths, KDE Wallet, Social Desktop, Web Shortcuts)
 </para></listitem>
 <listitem><para>
 Application Appearance (Style, Colors, Icons, Fonts, Emoticons)
@@ -238,13 +241,10 @@ Digital Camera
 Display and Monitor (Size &amp; Orientation, Screen Locker, Gamma)
 </para></listitem>
 <listitem><para>
-Information Sources
-</para></listitem>
-<listitem><para>
 Input Devices (Keyboard, Mouse, Joystick, Remote Controls)
 </para></listitem>
 <listitem><para>
-Power Management (Energy Savings Settings, Activity settings, Advanced settings)
+Power Management (Energy Savings Settings, Activity Settings, Advanced Settings)
 </para></listitem>
 <listitem><para>
 Printers
@@ -253,7 +253,7 @@ Printers
 Removable Devices
 </para></listitem>
 <listitem><para>
-Multimedia (Audio CDs, CDDB Retrieval, Phonon)
+Multimedia (Audio CDs, Audio and Video Settings, CDDB Retrieval)
 </para></listitem>
 </itemizedlist>
 </para>
@@ -319,7 +319,7 @@ You can change from <guilabel>Icon View</guilabel> (default view) to <guilabel>C
 
 <para>
 You can also turn off the detailed tooltips by unchecking <guilabel>Show detailed tooltips</guilabel>. 
-You will then get only normal tooltips.
+You will then get only normal tooltips and not the content of a module group.
 </para>
 </sect1>
 
@@ -329,6 +329,7 @@ You will then get only normal tooltips.
 <para>
 Individual modules can be run without running &systemsettings; using the command <command>kcmshell4</command> from the command line. Type <command>kcmshell4 --list</command> to see a list of the available &kde; &systemsettings; modules.
 </para>
+<!--FIXME kcmshell4 - -list has ~30 more kcms than in systemsettings-->
 </sect1>
 </chapter>
 
@@ -336,7 +337,7 @@ Individual modules can be run without running &systemsettings; using the command
 <title>The &kde; &systemsettings; Modules</title>
 
 <para>
-In order to make it as easy as possible, the &kde; &systemsettings; has organized options into five categories. Under each category, there are icons grouped together under subcategories. Each icon is called a module. When you click on a module icon, you will be presented with the options of the module in the main window.
+In order to make it as easy as possible, the &kde; &systemsettings; has organized options into five categories. Under each category, there are icons grouped together under subcategories. Each icon is called a module. When you double click on a module icon, you will be presented with the options of the module in the main window.
 </para>
 
 <para>
@@ -383,7 +384,7 @@ Clicking this button will save all changes to &kde;. If you have changed anythin
 
 <note>
 <para>
-You must either &quot;Reset&quot; or &quot;Apply&quot; the any changes before changing to another module.
+You must either &quot;Reset&quot; or &quot;Apply&quot; the changes before changing to another module.
 </para>
 <para>
 If you try to change without saving or resetting your options, you will be asked if you want to save your changes, or discard them.
@@ -401,6 +402,9 @@ If you try to change without saving or resetting your options, you will be asked
 </para>
 <para>
 Program copyright 2007 Benjamin C. Meyer.
+</para>
+<para>
+Program copyright 2009 Ben Cooksley.
 </para>
 <para>
 Contributors:

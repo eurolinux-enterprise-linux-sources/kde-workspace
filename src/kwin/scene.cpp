@@ -19,9 +19,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 *********************************************************************/
 
 /*
- (NOTE: The compositing code is work in progress. As such this design
- documentation may get outdated in some areas.)
-
  The base class for compositing, implementing shared functionality
  between the OpenGL and XRender backends.
 
@@ -31,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
  drawing of windows to pixmaps and XDamage extension is used to get informed
  about damage (changes) to window contents. This code is mostly in composite.cpp .
 
- Workspace::performCompositing() starts one painting pass. Painting is done
+ Compositor::performCompositing() starts one painting pass. Painting is done
  by painting the screen, which in turn paints every window. Painting can be affected
  using effects, which are chained. E.g. painting a screen means that actually
  paintScreen() of the first effect is called, which possibly does modifications
@@ -75,14 +72,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QGraphicsScene>
 #include <QGraphicsView>
+#include <QVector2D>
 
 #include "client.h"
+#include "decorations.h"
 #include "deleted.h"
 #include "effects.h"
 #include "overlaywindow.h"
 #include "shadow.h"
 
 #include "thumbnailitem.h"
+#include "workspace.h"
 
 namespace KWin
 {
@@ -104,47 +104,62 @@ Scene::~Scene()
 }
 
 // returns mask and possibly modified region
-void Scene::paintScreen(int* mask, QRegion* region)
+void Scene::paintScreen(int* mask, const QRegion &damage, const QRegion &repaint,
+                        QRegion *updateRegion, QRegion *validRegion)
 {
-    *mask = (*region == QRegion(0, 0, displayWidth(), displayHeight()))
-            ? 0 : PAINT_SCREEN_REGION;
+    const QRegion displayRegion(0, 0, displayWidth(), displayHeight());
+    *mask = (damage == displayRegion) ? 0 : PAINT_SCREEN_REGION;
+
     updateTimeDiff();
     // preparation step
     static_cast<EffectsHandlerImpl*>(effects)->startPaint();
 
+    QRegion region = damage;
+
     ScreenPrePaintData pdata;
     pdata.mask = *mask;
-    pdata.paint = *region;
+    pdata.paint = region;
 
     effects->prePaintScreen(pdata, time_diff);
     *mask = pdata.mask;
-    *region = pdata.paint;
+    region = pdata.paint;
 
     if (*mask & (PAINT_SCREEN_TRANSFORMED | PAINT_SCREEN_WITH_TRANSFORMED_WINDOWS)) {
         // Region painting is not possible with transformations,
         // because screen damage doesn't match transformed positions.
         *mask &= ~PAINT_SCREEN_REGION;
-        *region = infiniteRegion();
+        region = infiniteRegion();
     } else if (*mask & PAINT_SCREEN_REGION) {
         // make sure not to go outside visible screen
-        *region &= QRegion(0, 0, displayWidth(), displayHeight());
+        region &= displayRegion;
     } else {
         // whole screen, not transformed, force region to be full
-        *region = QRegion(0, 0, displayWidth(), displayHeight());
+        region = displayRegion;
     }
-    painted_region = *region;
+
+    painted_region = region;
+    repaint_region = repaint;
+
     if (*mask & PAINT_SCREEN_BACKGROUND_FIRST) {
-        paintBackground(*region);
+        paintBackground(region);
     }
+
     ScreenPaintData data;
-    effects->paintScreen(*mask, *region, data);
-    foreach (Window * w, stacking_order) {
+    effects->paintScreen(*mask, region, data);
+
+    foreach (Window *w, stacking_order) {
         effects->postPaintWindow(effectWindow(w));
     }
+
     effects->postPaintScreen();
-    *region |= painted_region;
+
     // make sure not to go outside of the screen area
-    *region &= QRegion(0, 0, displayWidth(), displayHeight());
+    *updateRegion = damaged_region;
+    *validRegion = (region | painted_region) & displayRegion;
+
+    repaint_region = QRegion();
+    damaged_region = QRegion();
+
     // make sure all clipping is restored
     Q_ASSERT(!PaintClipper::clip());
 }
@@ -161,10 +176,7 @@ void Scene::updateTimeDiff()
         last_time.start();
     } else
 
-    // the extra wspace->nextFrameDelay() basically means that we lie to the effect about the passed
-    // time - as a result the (animated) effect will run up to a frame shorter but in return stick
-    // closer to the runtime from the trigger
-    time_diff = last_time.restart()/* + wspace->nextFrameDelay()*/;
+    time_diff = last_time.restart();
 
     if (time_diff < 0)   // check time rollback
         time_diff = 1;
@@ -227,6 +239,8 @@ void Scene::paintGenericScreen(int orig_mask, ScreenPaintData)
     foreach (const Phase2Data & d, phase2) {
         paintWindow(d.window, d.mask, d.region, d.quads);
     }
+
+    damaged_region = QRegion(0, 0, displayWidth(), displayHeight());
 }
 
 // The optimized case without any transformations at all.
@@ -239,6 +253,7 @@ void Scene::paintSimpleScreen(int orig_mask, QRegion region)
     QList< QPair< Window*, Phase2Data > > phase2data;
 
     QRegion dirtyArea = region;
+    bool opaqueFullscreen(false);
     for (int i = 0;  // do prePaintWindow bottom to top
             i < stacking_order.count();
             ++i) {
@@ -257,10 +272,12 @@ void Scene::paintSimpleScreen(int orig_mask, QRegion region)
         topw->resetRepaints();
 
         // Clip out the decoration for opaque windows; the decoration is drawn in the second pass
+        opaqueFullscreen = false; // TODO: do we care about unmanged windows here (maybe input windows?)
         if (w->isOpaque()) {
             Client *c = NULL;
             if (topw->isClient()) {
                 c = static_cast<Client*>(topw);
+                opaqueFullscreen = c->isFullScreen();
             }
             // the window is fully opaque
             if (c && c->decorationHasAlpha()) {
@@ -300,13 +317,31 @@ void Scene::paintSimpleScreen(int orig_mask, QRegion region)
         w->suspendUnredirect(data.mask & PAINT_WINDOW_TRANSLUCENT);
     }
 
-    // This is the occlusion culling pass
+    // Save the part of the repaint region that's exclusively rendered to
+    // bring a reused back buffer up to date. Then union the dirty region
+    // with the repaint region.
+    const QRegion repaintClip = repaint_region - dirtyArea;
+    dirtyArea |= repaint_region;
+
+    const QRegion displayRegion(0, 0, displayWidth(), displayHeight());
+    bool fullRepaint(dirtyArea == displayRegion); // spare some expensive region operations
+    if (!fullRepaint) {
+        extendPaintRegion(dirtyArea, opaqueFullscreen);
+        fullRepaint = (dirtyArea == displayRegion);
+    }
+
     QRegion allclips, upperTranslucentDamage;
+    upperTranslucentDamage = repaint_region;
+
+    // This is the occlusion culling pass
     for (int i = phase2data.count() - 1; i >= 0; --i) {
         QPair< Window*, Phase2Data > *entry = &phase2data[i];
         Phase2Data *data = &entry->second;
 
-        data->region |= upperTranslucentDamage;
+        if (fullRepaint)
+            data->region = displayRegion;
+        else
+            data->region |= upperTranslucentDamage;
 
         // subtract the parts which will possibly been drawn as part of
         // a higher opaque window
@@ -318,8 +353,9 @@ void Scene::paintSimpleScreen(int orig_mask, QRegion region)
             // clip away the opaque regions for all windows below this one
             allclips |= data->clip;
             // extend the translucent damage for windows below this by remaining (translucent) regions
-            upperTranslucentDamage |= data->region - data->clip;
-        } else {
+            if (!fullRepaint)
+                upperTranslucentDamage |= data->region - data->clip;
+        } else if (!fullRepaint) {
             upperTranslucentDamage |= data->region;
         }
     }
@@ -341,8 +377,24 @@ void Scene::paintSimpleScreen(int orig_mask, QRegion region)
 
         paintWindow(data->window, data->mask, data->region, data->quads);
     }
-    painted_region |= paintedArea;
+
+    if (fullRepaint) {
+        painted_region = displayRegion;
+        damaged_region = displayRegion;
+    } else {
+        painted_region |= paintedArea;
+
+        // Clip the repainted region from the damaged region.
+        // It's important that we don't add the union of the damaged region
+        // and the repainted region to the damage history. Otherwise the
+        // repaint region will grow with every frame until it eventually
+        // covers the whole back buffer, at which point we're always doing
+        // full repaints.
+        damaged_region = paintedArea - repaintClip;
+    }
 }
+
+static Scene::Window *s_recursionCheck = NULL;
 
 void Scene::paintWindow(Window* w, int mask, QRegion region, WindowQuadList quads)
 {
@@ -350,25 +402,42 @@ void Scene::paintWindow(Window* w, int mask, QRegion region, WindowQuadList quad
     region &= QRect(0, 0, displayWidth(), displayHeight());
     if (region.isEmpty())  // completely clipped
         return;
+    if (w->window()->isDeleted() && w->window()->skipsCloseAnimation()) {
+        // should not get painted
+        return;
+    }
+
+    if (s_recursionCheck == w) {
+        return;
+    }
 
     WindowPaintData data(w->window()->effectWindow());
     data.quads = quads;
     effects->paintWindow(effectWindow(w), mask, region, data);
     // paint thumbnails on top of window
+    paintWindowThumbnails(w, region, data.opacity(), data.brightness(), data.saturation());
+    // and desktop thumbnails
+    paintDesktopThumbnails(w);
+}
+
+void Scene::paintWindowThumbnails(Scene::Window *w, QRegion region, qreal opacity, qreal brightness, qreal saturation)
+{
     EffectWindowImpl *wImpl = static_cast<EffectWindowImpl*>(effectWindow(w));
-    for (QHash<ThumbnailItem*, QWeakPointer<EffectWindowImpl> >::const_iterator it = wImpl->thumbnails().constBegin();
+    for (QHash<WindowThumbnailItem*, QWeakPointer<EffectWindowImpl> >::const_iterator it = wImpl->thumbnails().constBegin();
             it != wImpl->thumbnails().constEnd();
             ++it) {
         if (it.value().isNull()) {
             continue;
         }
-        ThumbnailItem *item = it.key();
+        WindowThumbnailItem *item = it.key();
         if (!item->isVisible()) {
             continue;
         }
         EffectWindowImpl *thumb = it.value().data();
         WindowPaintData thumbData(thumb);
-        thumbData.setOpacity(data.opacity());
+        thumbData.setOpacity(opacity);
+        thumbData.setBrightness(brightness * item->brightness());
+        thumbData.setSaturation(saturation * item->saturation());
 
         const QRect visualThumbRect(thumb->expandedGeometry());
 
@@ -384,35 +453,12 @@ void Scene::paintWindow(Window* w, int mask, QRegion region, WindowQuadList quad
         if (item->scene() == 0) {
             continue;
         }
-        // in principle there could be more than one QGraphicsView per QGraphicsScene,
-        // although TabBox does not make use of it so far
-        QList<QGraphicsView*> views = item->scene()->views();
-        QGraphicsView* declview = 0;
-        QPoint viewPos;
-        foreach (QGraphicsView* view, views) {
-            if (view->winId() == w->window()->window()) {
-                declview = view;
-                break;
-            }
-            QWidget *parent = view;
-            while ((parent = parent->parentWidget())) {
-                // if the graphicsview is not the topmost widget we try to go up to the
-                // toplevel widget and check whether that is the window we are looking for.
-                if (parent->winId() == w->window()->window()) {
-                    declview = view;
-                    viewPos = view->mapTo(parent, QPoint());
-                    break;
-                }
-            }
-            if (declview) {
-                // our nested loop found it, so we can break this loop as well
-                // doesn't look nice, but still better than goto
-                break;
-            }
-        }
+
+        QGraphicsView* declview = findViewForThumbnailItem(item, w);
         if (declview == 0) {
             continue;
         }
+        QPoint viewPos = findOffsetInWindow(declview, w->window()->window());
         const QPoint point = viewPos + declview->mapFromScene(item->scenePos());
         qreal x = point.x() + w->x() + (item->width() - size.width())/2;
         qreal y = point.y() + w->y() + (item->height() - size.height()) / 2;
@@ -443,6 +489,95 @@ void Scene::paintWindow(Window* w, int mask, QRegion region, WindowQuadList quad
     }
 }
 
+void Scene::paintDesktopThumbnails(Scene::Window *w)
+{
+    EffectWindowImpl *wImpl = static_cast<EffectWindowImpl*>(effectWindow(w));
+    for (QList<DesktopThumbnailItem*>::const_iterator it = wImpl->desktopThumbnails().constBegin();
+            it != wImpl->desktopThumbnails().constEnd();
+            ++it) {
+        DesktopThumbnailItem *item = *it;
+        if (!item->isVisible()) {
+            continue;
+        }
+        // it can happen in the init/closing phase of the tabbox
+        // that the corresponding QGraphicsScene is not available
+        if (item->scene() == 0) {
+            continue;
+        }
+        QGraphicsView* declview = findViewForThumbnailItem(item, w);
+        if (declview == 0) {
+            continue;
+        }
+        QPoint viewPos = findOffsetInWindow(declview, w->window()->window());
+        s_recursionCheck = w;
+
+        ScreenPaintData data;
+        QSize size = QSize(displayWidth(), displayHeight());
+
+        size.scale(item->width(), item->height(), Qt::KeepAspectRatio);
+        data *= QVector2D(size.width() / double(displayWidth()),
+                          size.height() / double(displayHeight()));
+        const QPoint point = viewPos + declview->mapFromScene(item->scenePos());
+        const qreal x = point.x() + w->x() + (item->width() - size.width())/2;
+        const qreal y = point.y() + w->y() + (item->height() - size.height()) / 2;
+        const QRect region = QRect(x, y, item->width(), item->height());
+        QRegion clippingRegion = region;
+        clippingRegion &= QRegion(wImpl->x(), wImpl->y(), wImpl->width(), wImpl->height());
+        QPainterPath path = item->clipPath();
+        if (!path.isEmpty()) {
+            // here we assume that the clippath consists of a single rectangle
+            const QPolygonF sceneBounds = item->mapToScene(path.boundingRect());
+            const QRect viewBounds = declview->mapFromScene(sceneBounds).boundingRect();
+            // shrinking the rect due to rounding errors
+            clippingRegion &= viewBounds.adjusted(0,0,-1,-1).translated(viewPos + w->pos());
+        }
+        data += QPointF(x, y);
+        const int desktopMask = PAINT_SCREEN_TRANSFORMED | PAINT_WINDOW_TRANSFORMED | PAINT_SCREEN_BACKGROUND_FIRST;
+        paintDesktop(item->desktop(), desktopMask, clippingRegion, data);
+        s_recursionCheck = NULL;
+    }
+}
+
+QGraphicsView *Scene::findViewForThumbnailItem(AbstractThumbnailItem *item, Scene::Window *w)
+{
+    // in principle there could be more than one QGraphicsView per QGraphicsScene,
+    // although TabBox does not make use of it so far
+    QList<QGraphicsView*> views = item->scene()->views();
+    foreach (QGraphicsView* view, views) {
+        if (view->winId() == w->window()->window()) {
+            return view;
+        }
+        QWidget *parent = view;
+        while ((parent = parent->parentWidget())) {
+            // if the graphicsview is not the topmost widget we try to go up to the
+            // toplevel widget and check whether that is the window we are looking for.
+            if (parent->winId() == w->window()->window()) {
+                return view;
+            }
+        }
+    }
+    return NULL;
+}
+
+QPoint Scene::findOffsetInWindow(QWidget *view, xcb_window_t idOfTopmostWindow)
+{
+    if (view->winId() == idOfTopmostWindow) {
+        return QPoint();
+    }
+    QWidget *parent = view;
+    while ((parent = parent->parentWidget())) {
+        if (parent->winId() == idOfTopmostWindow) {
+            return view->mapTo(parent, QPoint());
+        }
+    }
+    return QPoint();
+}
+
+void Scene::paintDesktop(int desktop, int mask, const QRegion &region, ScreenPaintData &data)
+{
+    static_cast<EffectsHandlerImpl*>(effects)->paintDesktop(desktop, mask, region, data);
+}
+
 // the function that'll be eventually called by paintWindow() above
 void Scene::finalPaintWindow(EffectWindowImpl* w, int mask, QRegion region, WindowPaintData& data)
 {
@@ -455,7 +590,18 @@ void Scene::finalDrawWindow(EffectWindowImpl* w, int mask, QRegion region, Windo
     w->sceneWindow()->performPaint(mask, region, data);
 }
 
-bool Scene::waitSyncAvailable() const
+void Scene::extendPaintRegion(QRegion &region, bool opaqueFullscreen)
+{
+    Q_UNUSED(region);
+    Q_UNUSED(opaqueFullscreen);
+}
+
+bool Scene::blocksForRetrace() const
+{
+    return false;
+}
+
+bool Scene::syncsToVBlank() const
 {
     return false;
 }
@@ -473,6 +619,9 @@ Scene::Window::Window(Toplevel * c)
     : toplevel(c)
     , filter(ImageFilterFast)
     , m_shadow(NULL)
+    , m_currentPixmap()
+    , m_previousPixmap()
+    , m_referencePixmapCounter(0)
     , disable_painting(0)
     , shape_valid(false)
     , cached_quad_list(NULL)
@@ -483,6 +632,32 @@ Scene::Window::~Window()
 {
     delete cached_quad_list;
     delete m_shadow;
+}
+
+void Scene::Window::referencePreviousPixmap()
+{
+    if (!m_previousPixmap.isNull() && m_previousPixmap->isDiscarded()) {
+        m_referencePixmapCounter++;
+    }
+}
+
+void Scene::Window::unreferencePreviousPixmap()
+{
+    if (m_previousPixmap.isNull() || !m_previousPixmap->isDiscarded()) {
+        return;
+    }
+    m_referencePixmapCounter--;
+    if (m_referencePixmapCounter == 0) {
+        m_previousPixmap.reset();
+    }
+}
+
+void Scene::Window::pixmapDiscarded()
+{
+    if (!m_currentPixmap.isNull() && m_currentPixmap->isValid()) {
+        m_previousPixmap.reset(m_currentPixmap.take());
+        m_previousPixmap->markAsDiscarded();
+    }
 }
 
 void Scene::Window::discardShape()
@@ -564,8 +739,14 @@ void Scene::Window::resetPaintingEnabled()
     disable_painting = 0;
     if (toplevel->isDeleted())
         disable_painting |= PAINT_DISABLED_BY_DELETE;
-    if (!toplevel->isOnCurrentDesktop())
-        disable_painting |= PAINT_DISABLED_BY_DESKTOP;
+    if (static_cast<EffectsHandlerImpl*>(effects)->isDesktopRendering()) {
+        if (!toplevel->isOnDesktop(static_cast<EffectsHandlerImpl*>(effects)->currentRenderedDesktop())) {
+            disable_painting |= PAINT_DISABLED_BY_DESKTOP;
+        }
+    } else {
+        if (!toplevel->isOnCurrentDesktop())
+            disable_painting |= PAINT_DISABLED_BY_DESKTOP;
+    }
     if (!toplevel->isOnCurrentActivity())
         disable_painting |= PAINT_DISABLED_BY_ACTIVITY;
     if (toplevel->isClient()) {
@@ -600,20 +781,25 @@ WindowQuadList Scene::Window::buildQuads(bool force) const
         Client *client = dynamic_cast<Client*>(toplevel);
         QRegion contents = clientShape();
         QRegion center = toplevel->transparentRect();
-        QRegion decoration = (client && Workspace::self()->decorationHasAlpha() ?
+        QRegion decoration = (client && decorationPlugin()->hasAlpha() ?
                               QRegion(client->decorationRect()) : shape()) - center;
         ret = makeQuads(WindowQuadContents, contents);
-        if (!client || !(center.isEmpty() || client->isShade()))
-            ret += makeQuads(WindowQuadDecoration, decoration);
-        else {
-            // this is a shaded client, we have to create four decoartion quads
-            QRect left, top, right, bottom;
-            client->layoutDecorationRects(left, top, right, bottom, Client::WindowRelative);
-            ret += makeQuads(WindowQuadDecoration, top);
-            ret += makeQuads(WindowQuadDecoration, bottom);
-            ret += makeQuads(WindowQuadDecoration, left);
-            ret += makeQuads(WindowQuadDecoration, right);
+
+        QRect rects[4];
+        bool isShadedClient = false;
+
+        if (client) {
+            client->layoutDecorationRects(rects[0], rects[1], rects[2], rects[3], Client::WindowRelative);
+            isShadedClient = client->isShade() || center.isEmpty();
         }
+
+        if (isShadedClient) {
+            const QRect bounding = rects[0] | rects[1] | rects[2] | rects[3];
+            ret += makeDecorationQuads(rects, bounding);
+        } else {
+            ret += makeDecorationQuads(rects, decoration);
+        }
+
     }
     if (m_shadow) {
         ret << m_shadow->shadowQuads();
@@ -621,6 +807,51 @@ WindowQuadList Scene::Window::buildQuads(bool force) const
     effects->buildQuads(toplevel->effectWindow(), ret);
     cached_quad_list = new WindowQuadList(ret);
     return ret;
+}
+
+WindowQuadList Scene::Window::makeDecorationQuads(const QRect *rects, const QRegion &region) const
+{
+    WindowQuadList list;
+
+    const QPoint offsets[4] = {
+        QPoint(-rects[0].x(),                    -rects[0].y()),                     // Left
+        QPoint(-rects[1].x(),                    -rects[1].y()),                     // Top
+        QPoint(-rects[2].x() + rects[0].width(), -rects[2].y()),                     // Right
+        QPoint(-rects[3].x(),                    -rects[3].y() + rects[1].height())  // Bottom
+    };
+
+    const WindowQuadType types[4] = {
+        WindowQuadDecorationLeftRight, // Left
+        WindowQuadDecorationTopBottom, // Top
+        WindowQuadDecorationLeftRight, // Right
+        WindowQuadDecorationTopBottom  // Bottom
+    };
+
+    for (int i = 0; i < 4; i++) {
+        foreach (const QRect &r, (region & rects[i]).rects()) {
+            if (!r.isValid())
+                continue;
+
+            const int x0 = r.x();
+            const int y0 = r.y();
+            const int x1 = r.x() + r.width();
+            const int y1 = r.y() + r.height();
+
+            const int u0 = x0 + offsets[i].x();
+            const int v0 = y0 + offsets[i].y();
+            const int u1 = x1 + offsets[i].x();
+            const int v1 = y1 + offsets[i].y();
+
+            WindowQuad quad(types[i]);
+            quad[0] = WindowVertex(x0, y0, u0, v0); // Top-left
+            quad[1] = WindowVertex(x1, y0, u1, v0); // Top-right
+            quad[2] = WindowVertex(x1, y1, u1, v1); // Bottom-right
+            quad[3] = WindowVertex(x0, y1, u0, v1); // Bottom-left
+            list.append(quad);
+        }
+    }
+
+    return list;
 }
 
 WindowQuadList Scene::Window::makeQuads(WindowQuadType type, const QRegion& reg) const
@@ -636,6 +867,57 @@ WindowQuadList Scene::Window::makeQuads(WindowQuadType type, const QRegion& reg)
         ret.append(quad);
     }
     return ret;
+}
+
+//****************************************
+// WindowPixmap
+//****************************************
+WindowPixmap::WindowPixmap(Scene::Window *window)
+    : m_window(window)
+    , m_pixmap(XCB_PIXMAP_NONE)
+    , m_discarded(false)
+{
+}
+
+WindowPixmap::~WindowPixmap()
+{
+    if (isValid()) {
+        xcb_free_pixmap(connection(), m_pixmap);
+    }
+}
+
+void WindowPixmap::create()
+{
+    if (isValid() || toplevel()->isDeleted()) {
+        return;
+    }
+    XServerGrabber grabber();
+    xcb_pixmap_t pix = xcb_generate_id(connection());
+    xcb_void_cookie_t namePixmapCookie = xcb_composite_name_window_pixmap_checked(connection(), toplevel()->frameId(), pix);
+    Xcb::WindowAttributes windowAttributes(toplevel()->frameId());
+    Xcb::WindowGeometry windowGeometry(toplevel()->frameId());
+    if (xcb_generic_error_t *error = xcb_request_check(connection(), namePixmapCookie)) {
+        kDebug(1212) << "Creating window pixmap failed: " << error->error_code;
+        free(error);
+        return;
+    }
+    // check that the received pixmap is valid and actually matches what we
+    // know about the window (i.e. size)
+    if (!windowAttributes || windowAttributes->map_state != XCB_MAP_STATE_VIEWABLE) {
+        kDebug(1212) << "Creating window pixmap failed: " << this;
+        xcb_free_pixmap(connection(), pix);
+        return;
+    }
+    if (!windowGeometry ||
+        windowGeometry->width != toplevel()->width() || windowGeometry->height != toplevel()->height()) {
+        kDebug(1212) << "Creating window pixmap failed: " << this;
+        xcb_free_pixmap(connection(), pix);
+        return;
+    }
+    m_pixmap = pix;
+    m_pixmapSize = QSize(toplevel()->width(), toplevel()->height());
+    m_contentsRect = QRect(toplevel()->clientPos(), toplevel()->clientSize());
+    m_window->unreferencePreviousPixmap();
 }
 
 //****************************************

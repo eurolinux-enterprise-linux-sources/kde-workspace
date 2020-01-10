@@ -1,0 +1,96 @@
+diff --git a/plasma/desktop/applets/tasks/CMakeLists.txt b/plasma/desktop/applets/tasks/CMakeLists.txt
+index 29bb5ad..aee560d 100644
+--- a/plasma/desktop/applets/tasks/CMakeLists.txt
++++ b/plasma/desktop/applets/tasks/CMakeLists.txt
+@@ -11,7 +11,7 @@ kde4_add_ui_files(tasks_SRCS tasksConfig.ui)
+
+ kde4_add_plugin(plasma_applet_tasks ${tasks_SRCS})
+
+-target_link_libraries(plasma_applet_tasks ${KDE4_KDEUI_LIBS} ${KDE4_PLASMA_LIBS} ${QT_QTDECLARATIVE_LIBRARY} taskmanager)
++target_link_libraries(plasma_applet_tasks ${KDE4_KDEUI_LIBS} ${KDE4_PLASMA_LIBS} ${QT_QTDECLARATIVE_LIBRARY} taskmanager kephal)
+
+ install(TARGETS plasma_applet_tasks DESTINATION ${PLUGIN_INSTALL_DIR})
+ install(FILES plasma-tasks-default.desktop DESTINATION ${SERVICES_INSTALL_DIR})
+diff --git a/plasma/desktop/applets/tasks/package/contents/ui/GroupDialog.qml b/plasma/desktop/applets/tasks/package/contents/ui/GroupDialog.qml
+index 4bba608..fe3c2b7 100644
+--- a/plasma/desktop/applets/tasks/package/contents/ui/GroupDialog.qml
++++ b/plasma/desktop/applets/tasks/package/contents/ui/GroupDialog.qml
+@@ -20,6 +20,7 @@
+ import QtQuick 1.1
+
+ import org.kde.plasma.core 0.1 as PlasmaCore
++import org.kde.plasma.extras 0.1 as PlasmaExtras
+ import org.kde.draganddrop 1.0
+
+ import "../code/layout.js" as Layout
+@@ -45,10 +46,15 @@ PlasmaCore.Dialog {
+
+             anchors.fill: parent
+
+-            Repeater {
+-                id: groupRepeater
++            PlasmaExtras.ScrollArea {
++                id: scrollArea
++                anchors.fill: parent
+
+-                onCountChanged: updateSize()
++                ListView {
++                    id: groupRepeater
++                    anchors.fill: parent
++                    onCountChanged: updateSize()
++                }
+             }
+         }
+     }
+@@ -87,8 +93,12 @@ PlasmaCore.Dialog {
+             var task;
+             var maxWidth = 0;
+
+-            for (var i = 0; i < taskList.children.length - 1; ++i) {
+-                task = taskList.children[i];
++            for (var i = 0; i < groupRepeater.count - 1; ++i) {
++                task = groupRepeater.contentItem.children[i];
++
++                if (!task || typeof task.textWidth == 'undefined') {
++                    continue
++                }
+
+                 if (task.textWidth > maxWidth) {
+                     maxWidth = task.textWidth;
+@@ -100,8 +110,13 @@ PlasmaCore.Dialog {
+             maxWidth += Layout.horizontalMargins() + theme.smallIconSize + 6;
+
+             // TODO: Properly derive limits from work area size (screen size sans struts).
++            mainItem.height = Math.min(screenHeight / 2, groupRepeater.count * (Layout.verticalMargins() + theme.smallIconSize));
+             mainItem.width = Math.min(maxWidth, (tasks.vertical ? 640 - tasks.width : Math.max(tasks.width, 640)) - 20);
+-            mainItem.height = groupRepeater.count * (Layout.verticalMargins() + theme.smallIconSize);
++
++            // Scrollbar is used so adjust width
++            if (mainItem.height >= screenHeight / 2) {
++                mainItem.width += 5
++            }
+         }
+     }
+
+diff --git a/plasma/desktop/applets/tasks/tasks.cpp b/plasma/desktop/applets/tasks/tasks.cpp
+index 4ebb87d..a919948 100644
+--- a/plasma/desktop/applets/tasks/tasks.cpp
++++ b/plasma/desktop/applets/tasks/tasks.cpp
+@@ -41,6 +41,9 @@
+ #include <taskmanager/taskitem.h>
+ #include <taskmanager/tasksmodel.h>
+
++#include "kephal/kephal/desktopwidgetscreens.h"
++#include "kephal/kephal/screens.h"
++
+ #include <QtDeclarative>
+
+ class GroupManager : public TaskManager::GroupManager
+@@ -97,6 +100,7 @@ void Tasks::init()
+     qmlRegisterType<ToolTipProxy>( "Tasks", 0, 1, "ToolTip" );
+     rootContext->setContextProperty("tasksModel", QVariant::fromValue(static_cast<QObject *>(m_tasksModel)));
+     rootContext->setContextProperty("dragHelper", QVariant::fromValue(static_cast<QObject *>(new DragHelper(this))));
++    rootContext->setContextProperty("screenHeight", Kephal::Screens::self()->screen(c->screen())->size().height());
+
+     // NOTE: This can go away once Plasma::Location becomes available (i.e. once this is
+     // a pure-QML applet.)

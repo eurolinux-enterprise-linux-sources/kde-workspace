@@ -48,18 +48,14 @@ BlurEffect::BlurEffect()
 
     target = new GLRenderTarget(tex);
 
-    net_wm_blur_region = XInternAtom(display(), "_KDE_NET_WM_BLUR_BEHIND_REGION", False);
-    effects->registerPropertyType(net_wm_blur_region, true);
-
     reconfigure(ReconfigureAll);
 
     // ### Hackish way to announce support.
     //     Should be included in _NET_SUPPORTED instead.
     if (shader && shader->isValid() && target->valid()) {
-        XChangeProperty(display(), rootWindow(), net_wm_blur_region, net_wm_blur_region,
-                        32, PropModeReplace, 0, 0);
+        net_wm_blur_region = effects->announceSupportProperty("_KDE_NET_WM_BLUR_BEHIND_REGION", this);
     } else {
-        XDeleteProperty(display(), rootWindow(), net_wm_blur_region);
+        net_wm_blur_region = 0;
     }
 
     connect(effects, SIGNAL(windowAdded(KWin::EffectWindow*)), this, SLOT(slotWindowAdded(KWin::EffectWindow*)));
@@ -74,9 +70,6 @@ BlurEffect::BlurEffect()
 
 BlurEffect::~BlurEffect()
 {
-    effects->registerPropertyType(net_wm_blur_region, false);
-    XDeleteProperty(display(), rootWindow(), net_wm_blur_region);
-
     windows.clear();
 
     delete shader;
@@ -233,25 +226,41 @@ QRegion BlurEffect::blurRegion(const EffectWindow *w) const
     return region;
 }
 
-void BlurEffect::drawRegion(const QRegion &region)
+void BlurEffect::uploadRegion(QVector2D *&map, const QRegion &region)
 {
-    const int vertexCount = region.rectCount() * 6;
-    if (vertices.size() < vertexCount)
-        vertices.resize(vertexCount);
+    foreach (const QRect &r, region.rects()) {
+        const QVector2D topLeft(r.x(), r.y());
+        const QVector2D topRight(r.x() + r.width(), r.y());
+        const QVector2D bottomLeft(r.x(), r.y() + r.height());
+        const QVector2D bottomRight(r.x() + r.width(), r.y() + r.height());
 
-    int i = 0;
-    foreach (const QRect & r, region.rects()) {
-        vertices[i++] = QVector2D(r.x() + r.width(), r.y());
-        vertices[i++] = QVector2D(r.x(),             r.y());
-        vertices[i++] = QVector2D(r.x(),             r.y() + r.height());
-        vertices[i++] = QVector2D(r.x(),             r.y() + r.height());
-        vertices[i++] = QVector2D(r.x() + r.width(), r.y() + r.height());
-        vertices[i++] = QVector2D(r.x() + r.width(), r.y());
+        // First triangle
+        *(map++) = topRight;
+        *(map++) = topLeft;
+        *(map++) = bottomLeft;
+
+        // Second triangle
+        *(map++) = bottomLeft;
+        *(map++) = bottomRight;
+        *(map++) = topRight;
     }
-    GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
-    vbo->reset();
-    vbo->setData(vertexCount, 2, (float*)vertices.constData(), (float*)vertices.constData());
-    vbo->render(GL_TRIANGLES);
+}
+
+void BlurEffect::uploadGeometry(GLVertexBuffer *vbo, const QRegion &horizontal, const QRegion &vertical)
+{
+    const int vertexCount = (horizontal.rectCount() + vertical.rectCount()) * 6;
+
+    QVector2D *map = (QVector2D *) vbo->map(vertexCount * sizeof(QVector2D));
+    uploadRegion(map, horizontal);
+    uploadRegion(map, vertical);
+    vbo->unmap();
+
+    const GLVertexAttrib layout[] = {
+        { VA_Position, 2, GL_FLOAT, 0 },
+        { VA_TexCoord, 2, GL_FLOAT, 0 }
+    };
+
+    vbo->setAttribLayout(layout, 2, sizeof(QVector2D));
 }
 
 void BlurEffect::prePaintScreen(ScreenPrePaintData &data, int time)
@@ -435,6 +444,11 @@ void BlurEffect::doBlur(const QRegion& shape, const QRect& screen, const float o
     const QRegion expanded = expand(shape) & screen;
     const QRect r = expanded.boundingRect();
 
+    // Upload geometry for the horizontal and vertical passes
+    GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
+    uploadGeometry(vbo, expanded, shape);
+    vbo->bindArrays();
+
     // Create a scratch texture and copy the area in the back buffer that we're
     // going to blur into it
     GLTexture scratch(r.width(), r.height());
@@ -467,7 +481,7 @@ void BlurEffect::doBlur(const QRegion& shape, const QRect& screen, const float o
     loadMatrix(textureMatrix);
     shader->setTextureMatrix(textureMatrix);
 
-    drawRegion(expanded);
+    vbo->draw(GL_TRIANGLES, 0, expanded.rectCount() * 6);
 
     GLRenderTarget::popRenderTarget();
     scratch.unbind();
@@ -495,7 +509,8 @@ void BlurEffect::doBlur(const QRegion& shape, const QRect& screen, const float o
     loadMatrix(textureMatrix);
     shader->setTextureMatrix(textureMatrix);
 
-    drawRegion(shape);
+    vbo->draw(GL_TRIANGLES, expanded.rectCount() * 6, shape.rectCount() * 6);
+    vbo->unbindArrays();
 
 #ifdef KWIN_HAVE_OPENGL_1
     if (effects->compositingType() == OpenGL1Compositing) {
@@ -591,6 +606,20 @@ void BlurEffect::doCachedBlur(EffectWindow *w, const QRegion& region, const floa
     const QRegion updateBackground = damagedRegion & region;
     const QRegion validUpdate = damagedRegion - expand(damagedRegion - region);
 
+    const QRegion horizontal = validUpdate.isEmpty() ? QRegion() : (updateBackground & screen);
+    const QRegion vertical   = blurredRegion & region;
+
+    const int horizontalOffset = 0;
+    const int horizontalCount = horizontal.rectCount() * 6;
+
+    const int verticalOffset = horizontalCount;
+    const int verticalCount = vertical.rectCount() * 6;
+
+    GLVertexBuffer *vbo = GLVertexBuffer::streamingBuffer();
+    uploadGeometry(vbo, horizontal, vertical);
+
+    vbo->bindArrays();
+
     if (!validUpdate.isEmpty()) {
         const QRect updateRect = (expand(updateBackground) & expanded).boundingRect();
         // First we have to copy the background from the frontbuffer
@@ -625,7 +654,7 @@ void BlurEffect::doCachedBlur(EffectWindow *w, const QRegion& region, const floa
 #endif
         shader->setTextureMatrix(textureMatrix);
 
-        drawRegion(updateBackground & screen);
+        vbo->draw(GL_TRIANGLES, horizontalOffset, horizontalCount);
 
         GLRenderTarget::popRenderTarget();
         tex.unbind();
@@ -666,7 +695,8 @@ void BlurEffect::doCachedBlur(EffectWindow *w, const QRegion& region, const floa
 #endif
     shader->setTextureMatrix(textureMatrix);
 
-    drawRegion(blurredRegion & region);
+    vbo->draw(GL_TRIANGLES, verticalOffset, verticalCount);
+    vbo->unbindArrays();
 
 #ifdef KWIN_HAVE_OPENGL_1
     if (effects->compositingType() == OpenGL1Compositing) {

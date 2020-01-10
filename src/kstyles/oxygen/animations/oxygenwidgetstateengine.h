@@ -44,8 +44,8 @@ namespace Oxygen
         public:
 
         //! constructor
-        WidgetStateEngine( QObject* parent ):
-        BaseEngine( parent )
+        explicit WidgetStateEngine( QObject* parent ):
+            BaseEngine( parent )
         {}
 
         //! destructor
@@ -120,4 +120,3 @@ namespace Oxygen
 Q_DECLARE_OPERATORS_FOR_FLAGS(Oxygen::AnimationModes)
 
 #endif
-

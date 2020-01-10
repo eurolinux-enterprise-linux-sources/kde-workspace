@@ -6,7 +6,7 @@
 // pass some window mouse press/release/move event actions to window manager
 // -------------------
 //
-// Copyright (c) 2010 Hugo Pereira Da Costa <hugo@oxygen-icons.org>
+// Copyright (c) 2010 Hugo Pereira Da Costa <hugo.pereira@free.fr>
 //
 // Largely inspired from BeSpin style
 // Copyright (C) 2007 Thomas Luebking <thomas.luebking@web.de>
@@ -205,7 +205,7 @@ namespace Oxygen
             public:
 
             //! constructor
-            ExceptionId( const QString& value )
+            explicit ExceptionId( const QString& value )
             {
                 const QStringList args( value.split( "@" ) );
                 if( args.isEmpty() ) return;
@@ -273,7 +273,7 @@ namespace Oxygen
             public:
 
             //! constructor
-            AppEventFilter( WindowManager* parent ):
+            explicit AppEventFilter( WindowManager* parent ):
                 QObject( parent ),
                 _parent( parent )
             {}

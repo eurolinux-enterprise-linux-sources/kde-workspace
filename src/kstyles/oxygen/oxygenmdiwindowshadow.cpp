@@ -3,7 +3,7 @@
 // handle MDI windows' shadows
 // -------------------
 //
-// Copyright (c) 2010 Hugo Pereira Da Costa <hugo@oxygen-icons.org>
+// Copyright (c) 2010 Hugo Pereira Da Costa <hugo.pereira@free.fr>
 //
 // Largely inspired from skulpture widget style
 // Copyright (c) 2007-2009 Christoph Feck <christoph@maxiom.de>
@@ -88,19 +88,8 @@ namespace Oxygen
 
         // create shadow cache
         ShadowCache cache( helper );
-
-        // set shadow configuration
-        {
-            ShadowConfiguration shadowConfiguration( QPalette::Inactive );
-            shadowConfiguration.setShadowSize( MdiWindowShadow::ShadowSize );
-            cache.setShadowConfiguration( shadowConfiguration );
-        }
-
-        {
-            ShadowConfiguration shadowConfiguration( QPalette::Active );
-            shadowConfiguration.setShadowSize( MdiWindowShadow::ShadowSize );
-            cache.setShadowConfiguration( shadowConfiguration );
-        }
+        cache.setShadowSize( QPalette::Inactive, MdiWindowShadow::ShadowSize );
+        cache.setShadowSize( QPalette::Active, MdiWindowShadow::ShadowSize );
 
         // get tileset
         _tileSet = *cache.tileSet( ShadowCache::Key() );

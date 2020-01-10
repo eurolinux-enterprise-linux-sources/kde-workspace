@@ -23,16 +23,22 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "workspace.h"
 #include "effects.h"
 #include "deleted.h"
+#include "xcbutils.h"
+
+#include <QTimer>
+#include <QDebug>
 
 #include <X11/extensions/shape.h>
 
 namespace KWin
 {
 
-Unmanaged::Unmanaged(Workspace* ws)
-    : Toplevel(ws)
+Unmanaged::Unmanaged()
+    : Toplevel()
 {
+    ready_for_painting = false;
     connect(this, SIGNAL(geometryShapeChanged(KWin::Toplevel*,QRect)), SIGNAL(geometryChanged()));
+    QTimer::singleShot(50, this, SLOT(setReadyForPainting()));
 }
 
 Unmanaged::~Unmanaged()
@@ -54,6 +60,7 @@ bool Unmanaged::track(Window w)
     setWindowHandles(w, w);   // the window is also the frame
     XSelectInput(display(), w, attr.your_event_mask | StructureNotifyMask | PropertyChangeMask);
     geom = QRect(attr.x, attr.y, attr.width, attr.height);
+    checkScreen();
     vis = attr.visual;
     bit_depth = attr.depth;
     unsigned long properties[ 2 ];
@@ -69,10 +76,11 @@ bool Unmanaged::track(Window w)
     getWindowRole();
     getWmClientLeader();
     getWmClientMachine();
-    if (Extensions::shapeAvailable())
+    if (Xcb::Extensions::self()->isShapeAvailable())
         XShapeSelectInput(display(), w, ShapeNotifyMask);
     detectShape(w);
     getWmOpaqueRegion();
+    getSkipCloseAnimation();
     setupCompositing();
     ungrabXServer();
     if (effects)
@@ -89,20 +97,20 @@ void Unmanaged::release(bool on_shutdown)
     emit windowClosed(this, del);
     finishCompositing();
     if (!QWidget::find(window())) { // don't affect our own windows
-        if (Extensions::shapeAvailable())
+        if (Xcb::Extensions::self()->isShapeAvailable())
             XShapeSelectInput(display(), window(), NoEventMask);
         XSelectInput(display(), window(), NoEventMask);
     }
     if (!on_shutdown) {
-        workspace()->removeUnmanaged(this, Allowed);
+        workspace()->removeUnmanaged(this);
         addWorkspaceRepaint(del->visibleRect());
         disownDataPassedToDeleted();
         del->unrefWindow();
     }
-    deleteUnmanaged(this, Allowed);
+    deleteUnmanaged(this);
 }
 
-void Unmanaged::deleteUnmanaged(Unmanaged* c, allowed_t)
+void Unmanaged::deleteUnmanaged(Unmanaged* c)
 {
     delete c;
 }

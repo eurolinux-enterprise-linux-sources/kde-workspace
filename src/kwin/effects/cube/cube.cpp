@@ -2,7 +2,7 @@
  KWin - the KDE window manager
  This file is part of the KDE project.
 
- Copyright (C) 2008 Martin Gräßlin <ubuntu@martin-graesslin.com>
+ Copyright (C) 2008 Martin Gräßlin <mgraesslin@kde.org>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -25,10 +25,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <kaction.h>
 #include <kactioncollection.h>
-#include <klocale.h>
+#include <KDE/KLocalizedString>
 #include <kwinconfig.h>
 #include <kdebug.h>
+#include <KDE/KGlobal>
 
+#include <QApplication>
 #include <QColor>
 #include <QRect>
 #include <QEvent>
@@ -51,7 +53,6 @@ KWIN_EFFECT_SUPPORTED(cube, CubeEffect::supported())
 
 CubeEffect::CubeEffect()
     : activated(false)
-    , mousePolling(false)
     , cube_painting(false)
     , keyboard_grab(false)
     , schedule_close(false)
@@ -92,23 +93,36 @@ CubeEffect::CubeEffect()
     , zOrderingFactor(0.0f)
     , mAddedHeightCoeff1(0.0f)
     , mAddedHeightCoeff2(0.0f)
+    , m_shadersDir("kwin/shaders/1.10/")
     , m_cubeCapBuffer(NULL)
     , m_proxy(this)
 {
     desktopNameFont.setBold(true);
     desktopNameFont.setPointSize(14);
 
-    const QString fragmentshader = KGlobal::dirs()->findResource("data", "kwin/cube-reflection.glsl");
-    m_reflectionShader = ShaderManager::instance()->loadFragmentShader(ShaderManager::GenericShader, fragmentshader);
-    const QString capshader = KGlobal::dirs()->findResource("data", "kwin/cube-cap.glsl");
-    m_capShader = ShaderManager::instance()->loadFragmentShader(ShaderManager::GenericShader, capshader);
+#ifdef KWIN_HAVE_OPENGLES
+    const qint64 coreVersionNumber = kVersionNumber(3, 0);
+#else
+    const qint64 coreVersionNumber = kVersionNumber(1, 40);
+#endif
+    if (GLPlatform::instance()->glslVersion() >= coreVersionNumber)
+        m_shadersDir = "kwin/shaders/1.40/";
+
+    if (effects->compositingType() == OpenGL2Compositing) {
+        const QString fragmentshader = KGlobal::dirs()->findResource("data", m_shadersDir + "cube-reflection.glsl");
+        m_reflectionShader = ShaderManager::instance()->loadFragmentShader(ShaderManager::GenericShader, fragmentshader);
+        const QString capshader = KGlobal::dirs()->findResource("data", m_shadersDir + "cube-cap.glsl");
+        m_capShader = ShaderManager::instance()->loadFragmentShader(ShaderManager::GenericShader, capshader);
+    } else {
+        m_reflectionShader = NULL;
+        m_capShader = NULL;
+    }
     m_textureMirrorMatrix.scale(1.0, -1.0, 1.0);
     m_textureMirrorMatrix.translate(0.0, -1.0, 0.0);
     connect(effects, SIGNAL(tabBoxAdded(int)), this, SLOT(slotTabBoxAdded(int)));
     connect(effects, SIGNAL(tabBoxClosed()), this, SLOT(slotTabBoxClosed()));
     connect(effects, SIGNAL(tabBoxUpdated()), this, SLOT(slotTabBoxUpdated()));
-    connect(effects, SIGNAL(mouseChanged(QPoint,QPoint,Qt::MouseButtons,Qt::MouseButtons,Qt::KeyboardModifiers,Qt::KeyboardModifiers)),
-            this, SLOT(slotMouseChanged(QPoint,QPoint,Qt::MouseButtons,Qt::MouseButtons,Qt::KeyboardModifiers,Qt::KeyboardModifiers)));
+    connect(effects, SIGNAL(screenGeometryChanged(const QSize&)), this, SLOT(slotResetShaders()));
 
     reconfigure(ReconfigureAll);
 }
@@ -122,13 +136,13 @@ void CubeEffect::reconfigure(ReconfigureFlags)
 {
     CubeConfig::self()->readConfig();
     foreach (ElectricBorder border, borderActivate) {
-        effects->unreserveElectricBorder(border);
+        effects->unreserveElectricBorder(border, this);
     }
     foreach (ElectricBorder border, borderActivateCylinder) {
-        effects->unreserveElectricBorder(border);
+        effects->unreserveElectricBorder(border, this);
     }
     foreach (ElectricBorder border, borderActivateSphere) {
-        effects->unreserveElectricBorder(border);
+        effects->unreserveElectricBorder(border, this);
     }
     borderActivate.clear();
     borderActivateCylinder.clear();
@@ -138,21 +152,21 @@ void CubeEffect::reconfigure(ReconfigureFlags)
     borderList = CubeConfig::borderActivate();
     foreach (int i, borderList) {
         borderActivate.append(ElectricBorder(i));
-        effects->reserveElectricBorder(ElectricBorder(i));
+        effects->reserveElectricBorder(ElectricBorder(i), this);
     }
     borderList.clear();
     borderList.append(int(ElectricNone));
     borderList = CubeConfig::borderActivateCylinder();
     foreach (int i, borderList) {
         borderActivateCylinder.append(ElectricBorder(i));
-        effects->reserveElectricBorder(ElectricBorder(i));
+        effects->reserveElectricBorder(ElectricBorder(i), this);
     }
     borderList.clear();
     borderList.append(int(ElectricNone));
     borderList = CubeConfig::borderActivateSphere();
     foreach (int i, borderList) {
         borderActivateSphere.append(ElectricBorder(i));
-        effects->reserveElectricBorder(ElectricBorder(i));
+        effects->reserveElectricBorder(ElectricBorder(i), this);
     }
 
     cubeOpacity = (float)CubeConfig::opacity() / 100.0f;
@@ -209,7 +223,7 @@ void CubeEffect::reconfigure(ReconfigureFlags)
     }
 
     // set the cap color on the shader
-    if (m_capShader->isValid()) {
+    if (m_capShader && m_capShader->isValid()) {
         ShaderBinder binder(m_capShader);
         m_capShader->setUniform("u_capColor", capColor);
     }
@@ -217,15 +231,6 @@ void CubeEffect::reconfigure(ReconfigureFlags)
 
 CubeEffect::~CubeEffect()
 {
-    foreach (ElectricBorder border, borderActivate) {
-        effects->unreserveElectricBorder(border);
-    }
-    foreach (ElectricBorder border, borderActivateCylinder) {
-        effects->unreserveElectricBorder(border);
-    }
-    foreach (ElectricBorder border, borderActivateSphere) {
-        effects->unreserveElectricBorder(border);
-    }
     delete wallpaper;
     delete capTexture;
     delete cylinderShader;
@@ -286,21 +291,27 @@ void CubeEffect::slotWallPaperLoaded()
     watcher->deleteLater();
 }
 
+void CubeEffect::slotResetShaders()
+{
+    ShaderManager::instance()->resetShader(m_capShader,         ShaderManager::GenericShader);
+    ShaderManager::instance()->resetShader(m_reflectionShader,  ShaderManager::GenericShader);
+    ShaderManager::instance()->resetShader(cylinderShader,      ShaderManager::GenericShader);
+    ShaderManager::instance()->resetShader(sphereShader,        ShaderManager::GenericShader);
+}
+
 bool CubeEffect::loadShader()
 {
     if (!(GLPlatform::instance()->supports(GLSL) &&
             (effects->compositingType() == OpenGL2Compositing)))
         return false;
-    QString fragmentshader       =  KGlobal::dirs()->findResource("data", "kwin/cylinder.frag");
-    QString cylinderVertexshader =  KGlobal::dirs()->findResource("data", "kwin/cylinder.vert");
-    QString sphereVertexshader   = KGlobal::dirs()->findResource("data", "kwin/sphere.vert");
-    if (fragmentshader.isEmpty() || cylinderVertexshader.isEmpty() || sphereVertexshader.isEmpty()) {
+    QString cylinderVertexshader =  KGlobal::dirs()->findResource("data", m_shadersDir + "cylinder.vert");
+    QString sphereVertexshader   = KGlobal::dirs()->findResource("data", m_shadersDir + "sphere.vert");
+    if (cylinderVertexshader.isEmpty() || sphereVertexshader.isEmpty()) {
         kError(1212) << "Couldn't locate shader files" << endl;
         return false;
     }
 
-    // TODO: use generic shader - currently it is failing in alpha/brightness manipulation
-    cylinderShader = new GLShader(cylinderVertexshader, fragmentshader);
+    cylinderShader = ShaderManager::instance()->loadVertexShader(ShaderManager::GenericShader, cylinderVertexshader);
     if (!cylinderShader->isValid()) {
         kError(1212) << "The cylinder shader failed to load!" << endl;
         return false;
@@ -329,8 +340,7 @@ bool CubeEffect::loadShader()
         QRect rect = effects->clientArea(FullArea, activeScreen, effects->currentDesktop());
         cylinderShader->setUniform("width", (float)rect.width() * 0.5f);
     }
-    // TODO: use generic shader - currently it is failing in alpha/brightness manipulation
-    sphereShader = new GLShader(sphereVertexshader, fragmentshader);
+    sphereShader = ShaderManager::instance()->loadVertexShader(ShaderManager::GenericShader, sphereVertexshader);
     if (!sphereShader->isValid()) {
         kError(1212) << "The sphere shader failed to load!" << endl;
         return false;
@@ -487,7 +497,7 @@ void CubeEffect::paintScreen(int mask, QRegion region, ScreenPaintData& data)
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             ShaderManager *shaderManager = ShaderManager::instance();
-            if (shaderManager->isValid() && m_reflectionShader->isValid()) {
+            if (shaderManager->isValid() && m_reflectionShader && m_reflectionShader->isValid()) {
                 // ensure blending is enabled - no attribute stack
                 ShaderBinder binder(m_reflectionShader);
                 QMatrix4x4 windowTransformation;
@@ -773,7 +783,7 @@ void CubeEffect::paintCap(bool frontFirst, float zOffset)
     }
 
     bool capShader = false;
-    if (effects->compositingType() == OpenGL2Compositing && m_capShader->isValid()) {
+    if (effects->compositingType() == OpenGL2Compositing && m_capShader && m_capShader->isValid()) {
         capShader = true;
         ShaderManager::instance()->pushShader(m_capShader);
         float opacity = cubeOpacity;
@@ -1144,7 +1154,7 @@ void CubeEffect::postPaintScreen()
                 if (keyboard_grab)
                     effects->ungrabKeyboard();
                 keyboard_grab = false;
-                effects->destroyInputWindow(input);
+                effects->stopMouseInterception(this);
 
                 effects->setActiveFullScreenEffect(0);
 
@@ -1313,6 +1323,7 @@ void CubeEffect::paintWindow(EffectWindow* w, int mask, QRegion region, WindowPa
     GLShader *shader = NULL;
     QMatrix4x4 origMatrix;
     if (activated && cube_painting) {
+        region= infiniteRegion(); // we need to explicitly prevent any clipping, bug #325432
         shader = shaderManager->pushShader(ShaderManager::GenericShader);
         //kDebug(1212) << w->caption();
         float opacity = cubeOpacity;
@@ -1546,7 +1557,7 @@ void CubeEffect::paintWindow(EffectWindow* w, int mask, QRegion region, WindowPa
                     }
                 }
                 bool capShader = false;
-                if (effects->compositingType() == OpenGL2Compositing && m_capShader->isValid()) {
+                if (effects->compositingType() == OpenGL2Compositing && m_capShader && m_capShader->isValid()) {
                     capShader = true;
                     ShaderManager::instance()->pushShader(m_capShader);
                     m_capShader->setUniform("u_mirror", 0);
@@ -1897,15 +1908,10 @@ void CubeEffect::setActive(bool active)
             connect(watcher, SIGNAL(finished()), SLOT(slotWallPaperLoaded()));
             watcher->setFuture(QtConcurrent::run(this, &CubeEffect::loadWallPaper, wallpaperPath));
         }
-        if (!mousePolling) {
-            effects->startMousePolling();
-            mousePolling = true;
-        }
         activated = true;
         activeScreen = effects->activeScreen();
         keyboard_grab = effects->grabKeyboard(this);
-        input = effects->createInputWindow(this, 0, 0, displayWidth(), displayHeight(),
-                                           Qt::OpenHandCursor);
+        effects->startMouseInterception(this, Qt::OpenHandCursor);
         frontDesktop = effects->currentDesktop();
         zoom = 0.0;
         zOrderingFactor = zPosition / (effects->stackingOrder().count() - 1);
@@ -1916,6 +1922,7 @@ void CubeEffect::setActive(bool active)
         verticalRotating = false;
         manualAngle = 0.0;
         manualVerticalAngle = 0.0;
+        desktopChangedWhileRotating = false;
         if (reflection) {
             QRect rect = effects->clientArea(FullArea, activeScreen, effects->currentDesktop());
 #ifndef KWIN_HAVE_OPENGLES
@@ -1933,18 +1940,13 @@ void CubeEffect::setActive(bool active)
         m_rotationMatrix.setToIdentity();
         effects->addRepaintFull();
     } else {
-        if (mousePolling) {
-            effects->stopMousePolling();
-            mousePolling = false;
-        }
         schedule_close = true;
         // we have to add a repaint, to start the deactivating
         effects->addRepaintFull();
     }
 }
 
-void CubeEffect::slotMouseChanged(const QPoint& pos, const QPoint& oldpos, Qt::MouseButtons buttons,
-                              Qt::MouseButtons oldbuttons, Qt::KeyboardModifiers, Qt::KeyboardModifiers)
+void CubeEffect::windowInputMouseEvent(QEvent* e)
 {
     if (!activated)
         return;
@@ -1952,8 +1954,17 @@ void CubeEffect::slotMouseChanged(const QPoint& pos, const QPoint& oldpos, Qt::M
         return;
     if (stop)
         return;
-    QRect rect = effects->clientArea(FullArea, activeScreen, effects->currentDesktop());
-    if (buttons.testFlag(Qt::LeftButton)) {
+
+    QMouseEvent *mouse = dynamic_cast< QMouseEvent* >(e);
+    if (!mouse)
+        return;
+
+    static QPoint oldpos;
+    static QElapsedTimer dblClckTime;
+    static int dblClckCounter(0);
+    if (mouse->type() == QEvent::MouseMove && mouse->buttons().testFlag(Qt::LeftButton)) {
+        const QPoint pos = mouse->pos();
+        QRect rect = effects->clientArea(FullArea, activeScreen, effects->currentDesktop());
         bool repaint = false;
         // vertical movement only if there is not a rotation
         if (!verticalRotating) {
@@ -1989,45 +2000,43 @@ void CubeEffect::slotMouseChanged(const QPoint& pos, const QPoint& oldpos, Qt::M
             rotateCube();
             effects->addRepaintFull();
         }
+        oldpos = pos;
     }
-    if (!oldbuttons.testFlag(Qt::LeftButton) && buttons.testFlag(Qt::LeftButton)) {
-        XDefineCursor(display(), input, QCursor(Qt::ClosedHandCursor).handle());
-    }
-    if (oldbuttons.testFlag(Qt::LeftButton) && !buttons.testFlag(Qt::LeftButton)) {
-        XDefineCursor(display(), input, QCursor(Qt::OpenHandCursor).handle());
-        if (closeOnMouseRelease)
-            setActive(false);
-    }
-    if (oldbuttons.testFlag(Qt::RightButton) && !buttons.testFlag(Qt::RightButton)) {
-        // end effect on right mouse button
-        setActive(false);
-    }
-}
 
-void CubeEffect::windowInputMouseEvent(Window w, QEvent* e)
-{
-    assert(w == input);
-    Q_UNUSED(w);
-    QMouseEvent *mouse = dynamic_cast< QMouseEvent* >(e);
-    if (mouse && mouse->type() == QEvent::MouseButtonRelease) {
-        if (mouse->button() == Qt::XButton1) {
-            if (!rotating && !start) {
-                rotating = true;
-                if (invertMouse)
-                    rotationDirection = Right;
-                else
-                    rotationDirection = Left;
-            } else {
-                if (rotations.count() < effects->numberOfDesktops()) {
-                    if (invertMouse)
-                        rotations.enqueue(Right);
-                    else
-                        rotations.enqueue(Left);
-                }
+    else if (mouse->type() == QEvent::MouseButtonPress && mouse->button() == Qt::LeftButton) {
+        oldpos = mouse->pos();
+        if (dblClckTime.elapsed() > QApplication::doubleClickInterval())
+            dblClckCounter = 0;
+        if (!dblClckCounter)
+            dblClckTime.start();
+    }
+
+    else if (mouse->type() == QEvent::MouseButtonRelease) {
+        effects->defineCursor(Qt::OpenHandCursor);
+        if (mouse->button() == Qt::LeftButton && ++dblClckCounter == 2) {
+            dblClckCounter = 0;
+            if (dblClckTime.elapsed() < QApplication::doubleClickInterval()) {
+                setActive(false);
+                return;
             }
-            effects->addRepaintFull();
         }
-        if (mouse->button() == Qt::XButton2) {
+        else if (mouse->button() == Qt::XButton1) {
+            if (!rotating && !start) {
+                rotating = true;
+                if (invertMouse)
+                    rotationDirection = Right;
+                else
+                    rotationDirection = Left;
+            } else {
+                if (rotations.count() < effects->numberOfDesktops()) {
+                    if (invertMouse)
+                        rotations.enqueue(Right);
+                    else
+                        rotations.enqueue(Left);
+                }
+            }
+            effects->addRepaintFull();
+        } else if (mouse->button() == Qt::XButton2) {
             if (!rotating && !start) {
                 rotating = true;
                 if (invertMouse)
@@ -2043,6 +2052,8 @@ void CubeEffect::windowInputMouseEvent(Window w, QEvent* e)
                 }
             }
             effects->addRepaintFull();
+        } else if (mouse->button() == Qt::RightButton || (mouse->button() == Qt::LeftButton && closeOnMouseRelease)) {
+            setActive(false);
         }
     }
 }

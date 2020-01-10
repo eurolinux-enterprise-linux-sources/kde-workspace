@@ -532,12 +532,13 @@ void DesktopCorona::addPanel(const QString &plugin)
     panel->setScreen(screen);
 
     QList<Plasma::Location> freeEdges = DesktopCorona::freeEdges(screen);
+
     //kDebug() << freeEdges;
     Plasma::Location destination;
-    if (freeEdges.contains(Plasma::TopEdge)) {
-        destination = Plasma::TopEdge;
-    } else if (freeEdges.contains(Plasma::BottomEdge)) {
+    if (freeEdges.contains(Plasma::BottomEdge)) {
         destination = Plasma::BottomEdge;
+    } else if (freeEdges.contains(Plasma::TopEdge)) {
+        destination = Plasma::TopEdge;
     } else if (freeEdges.contains(Plasma::LeftEdge)) {
         destination = Plasma::LeftEdge;
     } else if (freeEdges.contains(Plasma::RightEdge)) {
@@ -635,7 +636,7 @@ void DesktopCorona::checkActivities()
             }
 
             //create a new activity for the containment
-            QString id = m_activityController->addActivity(context->currentActivity());
+            const QString id = m_activityController->addActivity(context->currentActivity());
             context->setCurrentActivityId(id);
             newActivities << id;
             if (cont->screen() > -1) {

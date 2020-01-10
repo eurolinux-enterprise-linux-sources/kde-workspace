@@ -24,7 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QtDeclarative/QDeclarativeContext>
 #include <QtDeclarative/QDeclarativeEngine>
 #include <QtDeclarative/QDeclarativeItem>
-#include <QtGui/QGraphicsView>
+#include <QGraphicsView>
 #include <QPaintEngine>
 
 #include <KConfig>
@@ -161,7 +161,7 @@ bool AuroraeFactory::reset(unsigned long changed)
     if (changed & SettingFont){
         emit titleFontChanged();
     }
-    if (changed & SettingCompositing) {
+    if (changed == SettingCompositing) {
         return false;
     }
     const KConfig conf("auroraerc");
@@ -180,7 +180,7 @@ bool AuroraeFactory::reset(unsigned long changed)
         m_theme->setButtonSize((KDecorationDefines::BorderSize)themeGroup.readEntry<int>("ButtonSize", KDecorationDefines::BorderNormal));
     }
     emit configChanged();
-    return false; // need hard reset
+    return changed & (SettingDecoration | SettingButtons | SettingBorder); // need hard reset
 }
 
 bool AuroraeFactory::supports(Ability ability) const
@@ -200,6 +200,7 @@ bool AuroraeFactory::supports(Ability ability) const
     case AbilityButtonShade:
     case AbilityButtonOnAllDesktops:
     case AbilityButtonHelp:
+    case AbilityButtonApplicationMenu:
     case AbilityProvidesShadow:
         return true; // TODO: correct value from theme
     case AbilityTabbing:
@@ -248,6 +249,8 @@ AuroraeClient::AuroraeClient(KDecorationBridge *bridge, KDecorationFactory *fact
     connect(AuroraeFactory::instance(), SIGNAL(configChanged()), SIGNAL(configChanged()));
     connect(AuroraeFactory::instance(), SIGNAL(titleFontChanged()), SIGNAL(fontChanged()));
     connect(m_item, SIGNAL(alphaChanged()), SLOT(slotAlphaChanged()));
+    connect(this, SIGNAL(appMenuAvailable()), SIGNAL(appMenuAvailableChanged()));
+    connect(this, SIGNAL(appMenuUnavailable()), SIGNAL(appMenuAvailableChanged()));
 }
 
 AuroraeClient::~AuroraeClient()
@@ -362,17 +365,13 @@ void AuroraeClient::borders(int &left, int &right, int &top, int &bottom) const
         return;
     }
     const bool maximized = maximizeMode() == MaximizeFull && !options()->moveResizeMaximizedWindows();
+    QObject *borders = NULL;
     if (maximized) {
-        left = m_item->property("borderLeftMaximized").toInt();
-        right = m_item->property("borderRightMaximized").toInt();
-        top = m_item->property("borderTopMaximized").toInt();
-        bottom = m_item->property("borderBottomMaximized").toInt();
+        borders = m_item->findChild<QObject*>("maximizedBorders");
     } else {
-        left = m_item->property("borderLeft").toInt();
-        right = m_item->property("borderRight").toInt();
-        top = m_item->property("borderTop").toInt();
-        bottom = m_item->property("borderBottom").toInt();
+        borders = m_item->findChild<QObject*>("borders");
     }
+    sizesFromBorders(borders, left, right, top, bottom);
 }
 
 void AuroraeClient::padding(int &left, int &right, int &top, int &bottom) const
@@ -385,10 +384,18 @@ void AuroraeClient::padding(int &left, int &right, int &top, int &bottom) const
         left = right = top = bottom = 0;
         return;
     }
-    left = m_item->property("paddingLeft").toInt();
-    right = m_item->property("paddingRight").toInt();
-    top = m_item->property("paddingTop").toInt();
-    bottom = m_item->property("paddingBottom").toInt();
+    sizesFromBorders(m_item->findChild<QObject*>("padding"), left, right, top, bottom);
+}
+
+void AuroraeClient::sizesFromBorders(const QObject *borders, int &left, int &right, int &top, int &bottom) const
+{
+    if (!borders) {
+        return;
+    }
+    left = borders->property("left").toInt();
+    right = borders->property("right").toInt();
+    top = borders->property("top").toInt();
+    bottom = borders->property("bottom").toInt();
 }
 
 QSize AuroraeClient::minimumSize() const
@@ -400,7 +407,7 @@ KDecorationDefines::Position AuroraeClient::mousePosition(const QPoint &point) c
 {
     // based on the code from deKorator
     int pos = PositionCenter;
-    if (isShade()) {
+    if (isShade() || isMaximized()) {
         return Position(pos);
     }
 
@@ -408,9 +415,8 @@ KDecorationDefines::Position AuroraeClient::mousePosition(const QPoint &point) c
     borders(borderLeft, borderRight, borderTop, borderBottom);
     int paddingLeft, paddingTop, paddingRight, paddingBottom;
     padding(paddingLeft, paddingRight, paddingTop, paddingBottom);
-    const bool maximized = maximizeMode() == MaximizeFull && !options()->moveResizeMaximizedWindows();
     int titleEdgeLeft, titleEdgeRight, titleEdgeTop, titleEdgeBottom;
-    AuroraeFactory::instance()->theme()->titleEdges(titleEdgeLeft, titleEdgeTop, titleEdgeRight, titleEdgeBottom, maximized);
+    AuroraeFactory::instance()->theme()->titleEdges(titleEdgeLeft, titleEdgeTop, titleEdgeRight, titleEdgeBottom, false);
     switch (AuroraeFactory::instance()->theme()->decorationPosition()) {
     case DecorationTop:
         borderTop = titleEdgeTop;
@@ -452,6 +458,11 @@ void AuroraeClient::menuClicked()
     showWindowMenu(QCursor::pos());
 }
 
+void AuroraeClient::appMenuClicked()
+{
+    showApplicationMenu(QCursor::pos());
+}
+
 void AuroraeClient::toggleShade()
 {
     setShade(!isShade());
@@ -489,8 +500,9 @@ void AuroraeClient::titleMouseMoved(int button, int buttons)
 
 void AuroraeClient::titlePressed(Qt::MouseButton button, Qt::MouseButtons buttons)
 {
-    QMouseEvent *event = new QMouseEvent(QEvent::MouseButtonPress, widget()->mapFromGlobal(QCursor::pos()),
-                                         QCursor::pos(), button, buttons, Qt::NoModifier);
+    const QPoint cursor = QCursor::pos();
+    QMouseEvent *event = new QMouseEvent(QEvent::MouseButtonPress, widget()->mapFromGlobal(cursor),
+                                         cursor, button, buttons, Qt::NoModifier);
     processMousePressEvent(event);
     delete event;
     event = 0;
@@ -498,8 +510,9 @@ void AuroraeClient::titlePressed(Qt::MouseButton button, Qt::MouseButtons button
 
 void AuroraeClient::titleReleased(Qt::MouseButton button, Qt::MouseButtons buttons)
 {
-    QMouseEvent *event = new QMouseEvent(QEvent::MouseButtonRelease, widget()->mapFromGlobal(QCursor::pos()),
-                                         QCursor::pos(), button, buttons, Qt::NoModifier);
+    const QPoint cursor = QCursor::pos();
+    QMouseEvent *event = new QMouseEvent(QEvent::MouseButtonRelease, widget()->mapFromGlobal(cursor),
+                                         cursor, button, buttons, Qt::NoModifier);
     QApplication::sendEvent(widget(), event);
     delete event;
     event = 0;
@@ -507,8 +520,9 @@ void AuroraeClient::titleReleased(Qt::MouseButton button, Qt::MouseButtons butto
 
 void AuroraeClient::titleMouseMoved(Qt::MouseButton button, Qt::MouseButtons buttons)
 {
-    QMouseEvent *event = new QMouseEvent(QEvent::MouseMove, widget()->mapFromGlobal(QCursor::pos()),
-                                         QCursor::pos(), button, buttons, Qt::NoModifier);
+    const QPoint cursor = QCursor::pos();
+    QMouseEvent *event = new QMouseEvent(QEvent::MouseMove, widget()->mapFromGlobal(cursor),
+                                         cursor, button, buttons, Qt::NoModifier);
     QApplication::sendEvent(widget(), event);
     delete event;
     event = 0;
@@ -591,6 +605,35 @@ void AuroraeClient::slotAlphaChanged()
         // by default all Aurorae themes use the alpha channel
         setAlphaEnabled(true);
     }
+}
+
+QRegion AuroraeClient::region(KDecorationDefines::Region r)
+{
+    if (r != ExtendedBorderRegion) {
+        return QRegion();
+    }
+    if (!m_item) {
+        return QRegion();
+    }
+    if (isMaximized()) {
+        // empty region for maximized windows
+        return QRegion();
+    }
+    int left, right, top, bottom;
+    left = right = top = bottom = 0;
+    sizesFromBorders(m_item->findChild<QObject*>("extendedBorders"), left, right, top, bottom);
+    if (top == 0 && right == 0 && bottom == 0 && left == 0) {
+        // no extended borders
+        return QRegion();
+    }
+
+    int paddingLeft, paddingRight, paddingTop, paddingBottom;
+    paddingLeft = paddingRight = paddingTop = paddingBottom = 0;
+    padding(paddingLeft, paddingRight, paddingTop, paddingBottom);
+    QRect rect = widget()->rect().adjusted(paddingLeft, paddingTop, -paddingRight, -paddingBottom);
+    rect.translate(-paddingLeft, -paddingTop);
+
+    return QRegion(rect.adjusted(-left, -top, right, bottom)).subtract(rect);
 }
 
 bool AuroraeClient::animationsSupported() const

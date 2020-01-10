@@ -26,7 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QBitmap>
 #include <QPainter>
 #include <kglobal.h>
-#include <klocale.h>
+#include <KDE/KLocalizedString>
 
 namespace Laptop {
 
@@ -35,6 +35,9 @@ static const unsigned char iconify_bits[] = {
 
 static const unsigned char close_bits[] = {
     0x42, 0xe7, 0x7e, 0x3c, 0x3c, 0x7e, 0xe7, 0x42};
+
+static const unsigned char appmenu_bits[] = {
+    0xff, 0xff, 0x00, 0xff, 0xff, 0x00, 0xff, 0xff};
 
 static const unsigned char maximize_bits[] = {
     0x18, 0x3c, 0x7e, 0xff, 0xff, 0x00, 0xff, 0xff };
@@ -263,6 +266,9 @@ void LaptopButton::reset(unsigned long changed)
             case CloseButton:
                 setBitmap(close_bits);
                 break;
+            case AppMenuButton:
+                setBitmap(appmenu_bits);
+                break;
             case HelpButton:
                 setBitmap(question_bits);
                 break;
@@ -404,13 +410,13 @@ int LaptopClient::layoutMetric(LayoutMetric lm, bool respectWindowState, const K
         case LM_TitleEdgeRight:
         case LM_BorderLeft:
         case LM_BorderRight:
-            return 4;
+            return (maximizeMode() & MaximizeHorizontal) ? 0 : 4;
 
         case LM_BorderBottom:
-            return mustDrawHandle() ? handleSize : 4;
+            return (maximizeMode() & MaximizeVertical) ? 0 : (isResizable() ? handleSize : 4);
 
         case LM_TitleEdgeTop:
-            return 3;
+            return (maximizeMode() & MaximizeVertical) ? 0 : 3;
 
         case LM_TitleEdgeBottom:
             return 1;
@@ -461,6 +467,9 @@ KCommonDecorationButton *LaptopClient::createButton(ButtonType type)
         case CloseButton:
             return new LaptopButton(CloseButton, this, "close");
 
+        case AppMenuButton:
+            return new LaptopButton(AppMenuButton, this, "Application Menu");
+
         default:
             return 0;
     }
@@ -486,59 +495,75 @@ void LaptopClient::paintEvent( QPaintEvent* )
     QPalette g = options()->palette(KDecoration::ColorFrame, isActive());
     g.setCurrentColorGroup( QPalette::Active );
 
+    const int borderBottom = layoutMetric(LM_BorderBottom);
+    const int borderLeft = layoutMetric(LM_BorderLeft);
+    const int titleEdgeTop = layoutMetric(LM_TitleEdgeTop);
+
     QRect r(widget()->rect());
-    p.setPen(Qt::black);
-    p.drawRect(r.adjusted(0, 0, -1, -1));
 
     // fill mid frame...
     p.setPen(g.background().color());
+    p.drawRect(r.adjusted(0,0,-1,-1));
     p.drawLine(r.x()+2, r.y()+2, r.right()-2, r.y()+2);
-    p.drawLine(r.left()+2, r.y()+3, r.left()+2, r.bottom()-layoutMetric(LM_BorderBottom)+1);
-    p.drawLine(r.right()-2, r.y()+3, r.right()-2, r.bottom()-layoutMetric(LM_BorderBottom)+1);
+    const int boff = borderBottom ? borderBottom - 1 : 1;
+    p.drawLine(r.left()+2, r.y()+3, r.left()+2, r.bottom() - boff);
+    p.drawLine(r.right()-2, r.y()+3, r.right()-2, r.bottom() - boff);
     p.drawLine(r.left()+3, r.y()+3, r.left()+3, r.y()+layoutMetric(LM_TitleEdgeTop)+layoutMetric(LM_TitleHeight)+layoutMetric(LM_TitleEdgeTop) );
     p.drawLine(r.right()-3, r.y()+3, r.right()-3, r.y()+layoutMetric(LM_TitleEdgeTop)+layoutMetric(LM_TitleHeight)+layoutMetric(LM_TitleEdgeTop) );
-    if (!mustDrawHandle() )
+    if (borderBottom)
         p.drawLine(r.left()+1, r.bottom()-2, r.right()-1, r.bottom()-2);
 
     // outer frame
-    p.setPen(g.color(QPalette::Light));
+    if (borderBottom)
+        p.setPen(g.color(QPalette::Light));
     p.drawLine(r.x()+1, r.y()+1, r.right()-1, r.y()+1);
     p.drawLine(r.x()+1, r.y()+1, r.x()+1, r.bottom()-1);
-    p.setPen(g.dark().color());
+    if (borderBottom)
+        p.setPen(g.dark().color());
     p.drawLine(r.right()-1, r.y()+1, r.right()-1, r.bottom()-1);
     p.drawLine(r.x()+1, r.bottom()-1, r.right()-1, r.bottom()-1);
 
     int th = titleHeight;
     int bb = handleSize + 2; // Bottom border
     int bs = handleSize - 2; // inner size of bottom border
+    int tb = layoutMetric(LM_TitleEdgeTop, false, NULL); // top border
+    int sb = layoutMetric(LM_BorderRight, false, NULL) - 1; // side border
     if (!mustDrawHandle()) {
-	bb = 6;
-	bs = 0;
+        bb = borderBottom + 2;
+        bs = 0;
     }
     if ( isToolWindow() )
-	th -= 2;
+        th -= 2;
 
     // inner rect
-    p.drawRect(r.x() + 3, r.y() + th + 3, r.width() - 7, r.height() - th - bb - 1);
+    p.drawRect(r.x() + sb, r.y() + th + tb, r.width() - (2*sb + 1), r.height() - (th + bb  + 1));
+
+    p.setPen(Qt::black);
+    if (titleEdgeTop)
+        p.drawLine(r.topLeft(), r.topRight());
+    if (borderBottom)
+        p.drawLine(r.bottomLeft(), r.bottomRight());
+    if (borderLeft) {
+        p.drawLine(r.topLeft(), r.bottomLeft());
+        p.drawLine(r.topRight(), r.bottomRight());
+    }
 
     // handles
     if (mustDrawHandle()) {
-	if (r.width() > 3*handleSize + 20) {
-	    int range = 8 + 3*handleSize/2;
-	    qDrawShadePanel(&p, r.x() + 1, r.bottom() - bs, range,
+        if (r.width() > 3*handleSize + 20) {
+            int range = 8 + 3*handleSize/2;
+            qDrawShadePanel(&p, r.x() + 1, r.bottom() - bs, range,
                             handleSize - 2, g, false, 1, &g.brush(QPalette::Mid));
-	    qDrawShadePanel(&p, r.x() + range + 1, r.bottom() - bs,
-		    r.width() - 2*range - 2, handleSize - 2, g, false, 1,
-		    isActive() ? &g.brush(QPalette::Background) :
-				 &g.brush(QPalette::Mid));
-	    qDrawShadePanel(&p, r.right() - range, r.bottom() - bs,
-		    range, bs, g, false, 1, &g.brush(QPalette::Mid));
-	} else {
-	    qDrawShadePanel(&p, r.x() + 1, r.bottom() - bs,
-		    r.width() - 2, bs, g, false, 1,
-		    isActive() ?  &g.brush(QPalette::Background) :
-				  &g.brush(QPalette::Mid));
-	}
+            qDrawShadePanel(&p, r.x() + range + 1, r.bottom() - bs,
+                            r.width() - 2*range - 2, handleSize - 2, g, false, 1,
+                            isActive() ? &g.brush(QPalette::Background) : &g.brush(QPalette::Mid));
+            qDrawShadePanel(&p, r.right() - range, r.bottom() - bs,
+                            range, bs, g, false, 1, &g.brush(QPalette::Mid));
+        } else {
+            qDrawShadePanel(&p, r.x() + 1, r.bottom() - bs,
+                            r.width() - 2, bs, g, false, 1,
+                            isActive() ?  &g.brush(QPalette::Background) : &g.brush(QPalette::Mid));
+        }
     }
 
     r = titleRect();
@@ -612,12 +637,7 @@ QRegion LaptopClient::cornerShape(WindowCorner corner)
 
 bool LaptopClient::mustDrawHandle() const
 {
-    bool drawSmallBorders = !options()->moveResizeMaximizedWindows();
-    if (drawSmallBorders && (maximizeMode() & MaximizeVertical)) {
-	return false;
-    } else {
-	return isResizable();
-    }
+    return isResizable() && !(maximizeMode() & MaximizeVertical);
 }
 
 void LaptopClient::updateActiveBuffer( )
@@ -626,7 +646,7 @@ void LaptopClient::updateActiveBuffer( )
     if( !bufferDirty && (lastBufferWidth == rTitle.width()))
         return;
     if ( rTitle.width() <= 0 || rTitle.height() <= 0 )
-	return;
+        return;
     lastBufferWidth = rTitle.width();
     bufferDirty = false;
 
@@ -739,6 +759,7 @@ bool LaptopClientFactory::supports( Ability ability ) const
         case AbilityButtonMaximize:
         case AbilityButtonClose:
         case AbilityButtonSpacer:
+        case AbilityButtonApplicationMenu:
         // colors
         case AbilityColorTitleBack:
         case AbilityColorTitleFore:

@@ -49,13 +49,16 @@
         <number>1</number>
        </property>
        <property name="maximum">
-        <number>7</number>
+        <number>14</number>
        </property>
        <property name="singleStep">
-        <number>1</number>
+        <number>2</number>
        </property>
        <property name="pageStep">
-        <number>1</number>
+        <number>2</number>
+       </property>
+       <property name="value">
+        <number>12</number>
        </property>
        <property name="orientation">
         <enum>Qt::Horizontal</enum>
@@ -80,7 +83,7 @@
       <string extracomment="Enables an internal texture cache which saves the background of the blurred area. This results in less repaints and in a slightly higher memory usage."/>
      </property>
      <property name="text">
-      <string>Safe intermediate rendering results.</string>
+      <string>Save intermediate rendering results.</string>
      </property>
     </widget>
    </item>

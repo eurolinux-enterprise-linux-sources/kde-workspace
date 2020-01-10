@@ -31,15 +31,16 @@ class AniData {
 public:
     AniData();
     AniData(AnimationEffect::Attribute a, int meta, int ms, const FPx2 &to,
-            QEasingCurve curve, int delay, const FPx2 &from, bool waitAtSource );
+            QEasingCurve curve, int delay, const FPx2 &from, bool waitAtSource, bool keepAtTarget = false);
     AniData(const AniData &other);
-    AniData(const QString &str);
+    explicit AniData(const QString &str);
     inline void addTime(int t) { time += t; }
     inline bool isOneDimensional() const {
         return from[0] == from[1] && to[0] == to[1];
     }
     static QList<AniData> list(const QString &str);
     QString toString() const;
+    QString debugInfo() const;
     AnimationEffect::Attribute attribute;
     QEasingCurve curve;
     int customCurve;
@@ -48,9 +49,11 @@ public:
     uint meta;
     qint64 startTime;
     NET::WindowTypeMask windowType;
-    bool waitAtSource;
+    bool waitAtSource, keepAtTarget;
 };
 
 } // namespace
+
+QDebug operator<<(QDebug dbg, const KWin::AniData &a);
 
 #endif // ANIDATA_H

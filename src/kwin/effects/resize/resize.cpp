@@ -2,7 +2,7 @@
  KWin - the KDE window manager
  This file is part of the KDE project.
 
-Copyright (C) 2009 Martin Gräßlin <kde@martin-graesslin.com>
+Copyright (C) 2009 Martin Gräßlin <mgraesslin@kde.org>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -24,8 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <kwinglutils.h>
 #ifdef KWIN_HAVE_XRENDER_COMPOSITING
-#include <X11/Xlib.h>
-#include <X11/extensions/Xrender.h>
+#include "kwinxrenderutils.h"
 #endif
 
 #include <KColorScheme>
@@ -38,7 +37,8 @@ namespace KWin
 KWIN_EFFECT(resize, ResizeEffect)
 
 ResizeEffect::ResizeEffect()
-    : m_active(false)
+    : AnimationEffect()
+    , m_active(false)
     , m_resizeWindow(0)
 {
     reconfigure(ReconfigureAll);
@@ -56,14 +56,14 @@ void ResizeEffect::prePaintScreen(ScreenPrePaintData& data, int time)
     if (m_active) {
         data.mask |= PAINT_SCREEN_WITH_TRANSFORMED_WINDOWS;
     }
-    effects->prePaintScreen(data, time);
+    AnimationEffect::prePaintScreen(data, time);
 }
 
 void ResizeEffect::prePaintWindow(EffectWindow* w, WindowPrePaintData& data, int time)
 {
     if (m_active && w == m_resizeWindow)
         data.mask |= PAINT_WINDOW_TRANSFORMED;
-    effects->prePaintWindow(w, data, time);
+    AnimationEffect::prePaintWindow(w, data, time);
 }
 
 void ResizeEffect::paintWindow(EffectWindow* w, int mask, QRegion region, WindowPaintData& data)
@@ -108,19 +108,20 @@ void ResizeEffect::paintWindow(EffectWindow* w, int mask, QRegion region, Window
 
 #ifdef KWIN_HAVE_XRENDER_COMPOSITING
             if (effects->compositingType() == XRenderCompositing) {
-                XRenderColor col;
-                col.alpha = int(alpha * 0xffff);
-                col.red = int(alpha * 0xffff * color.red() / 255);
-                col.green = int(alpha * 0xffff * color.green() / 255);
-                col.blue = int(alpha * 0xffff * color.blue() / 255);
-                foreach (const QRect & r, paintRegion.rects())
-                XRenderFillRectangle(display(), PictOpOver, effects->xrenderBufferPicture(),
-                                     &col, r.x(), r.y(), r.width(), r.height());
+                QVector<xcb_rectangle_t> rects;
+                foreach (const QRect & r, paintRegion.rects()) {
+                    xcb_rectangle_t rect = {int16_t(r.x()), int16_t(r.y()), uint16_t(r.width()), uint16_t(r.height())};
+                    rects << rect;
+                }
+                xcb_render_fill_rectangles(connection(), XCB_RENDER_PICT_OP_OVER,
+                                           effects->xrenderBufferPicture(), preMultiply(color, alpha),
+                                           rects.count(), rects.constData());
             }
 #endif
         }
-    } else
-        effects->paintWindow(w, mask, region, data);
+    } else {
+        AnimationEffect::paintWindow(w, mask, region, data);
+    }
 }
 
 void ResizeEffect::reconfigure(ReconfigureFlags)
@@ -149,6 +150,8 @@ void ResizeEffect::slotWindowFinishUserMovedResized(EffectWindow *w)
     if (m_active && w == m_resizeWindow) {
         m_active = false;
         m_resizeWindow = NULL;
+        if (m_features & TextureScale)
+            animate(w, CrossFadePrevious, 0, 150, FPx2(1.0));
         effects->addRepaintFull();
     }
 }

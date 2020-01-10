@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 *********************************************************************/
 
 #include "main.h"
+#include "dbus.h"
 
 #include "kwin_interface.h"
 #include "kwinglobals.h"
@@ -76,34 +77,78 @@ ConfirmDialog::ConfirmDialog() :
 }
 
 
-KWinCompositingConfig::KWinCompositingConfig(QWidget *parent, const QVariantList &)
+KWinCompositingConfig::KWinCompositingConfig(QWidget *parent, const QVariantList &args)
     : KCModule(KWinCompositingConfigFactory::componentData(), parent)
     , mKWinConfig(KSharedConfig::openConfig("kwinrc"))
     , m_showConfirmDialog(false)
     , m_showDetailedErrors(new QAction(i18nc("Action to open a dialog showing detailed information why an effect could not be loaded",
                                              "Details"), this))
+    , m_dontShowAgain(new QAction(i18nc("Prevent warning from bein displayed again", "Don't show again!"), this))
 {
+    QDBusConnection::sessionBus().registerService("org.kde.kwinCompositingDialog");
+    QDBusConnection::sessionBus().registerObject("/CompositorSettings", this);
+    new MainAdaptor(this);
     KGlobal::locale()->insertCatalog("kwin_effects");
+    KGlobal::locale()->insertCatalog("kwin_scripting");
     ui.setupUi(this);
     layout()->setMargin(0);
     layout()->activate();
     ui.tabWidget->setCurrentIndex(0);
     ui.statusTitleWidget->hide();
     ui.rearmGlSupport->hide();
-    ui.messageBox->setVisible(false);
-    ui.messageBox->addAction(m_showDetailedErrors);
     ui.messageBox->setMessageType(KMessageWidget::Warning);
+    ui.messageBox->addAction(m_dontShowAgain);
+    foreach (QWidget *w, m_dontShowAgain->associatedWidgets())
+        w->setVisible(false);
+    ui.messageBox->addAction(m_showDetailedErrors);
+
+    bool showMessage = false;
+    QString message, details, dontAgainKey;
+    if (args.count() > 1) {
+        for (int i = 0; i < args.count() - 1; ++i) {
+            if (args.at(i).toString() == "warn") {
+                showMessage = true;
+                message = QString::fromLocal8Bit(QByteArray::fromBase64(args.at(i+1).toByteArray()));
+            } else if (args.at(i).toString() == "details") {
+                showMessage = true;
+                details = QString::fromLocal8Bit(QByteArray::fromBase64(args.at(i+1).toByteArray()));
+            } else if (args.at(i).toString() == "dontagain") {
+                showMessage = true;
+                dontAgainKey = args.at(i+1).toString();
+            }
+        }
+    }
+
+    if (showMessage) {
+        ui.messageBox->setVisible(showMessage); // first show, animation is broken on init
+        warn(message, details, dontAgainKey);
+    } else
+        ui.messageBox->setVisible(false);
     ui.ghns->setIcon(KIcon("get-hot-new-stuff"));
 
     // For future use
     (void) I18N_NOOP("Use GLSL shaders");
 
-#define OPENGL_INDEX 0
-#define XRENDER_INDEX 1
+#define OPENGL31_INDEX 0
+#define OPENGL20_INDEX 1
+#define OPENGL12_INDEX 2
+#define XRENDER_INDEX  3
+
 #ifndef KWIN_HAVE_XRENDER_COMPOSITING
     ui.compositingType->removeItem(XRENDER_INDEX);
 #define XRENDER_INDEX -1
 #endif
+
+    ui.glSwapStrategy->addItem(i18n("None"), "n");
+    ui.glSwapStrategy->setItemData(0, i18n("The painting is not synchronized with the screen."), Qt::ToolTipRole);
+    ui.glSwapStrategy->addItem(i18n("Automatic"), "a");
+    ui.glSwapStrategy->setItemData(1, i18n("Tries to re-use older buffers and if that is not possible,\npicks a strategy matching your hardware."), Qt::ToolTipRole);
+    ui.glSwapStrategy->addItem(i18n("Only when Cheap"), "e");
+    ui.glSwapStrategy->setItemData(2, i18n("When major regions of the screen are updated,\nthe entire screen will be repainted.\nCan cause tearing with small updates."), Qt::ToolTipRole);
+    ui.glSwapStrategy->addItem(i18n("Full scene repaints"), "p");
+    ui.glSwapStrategy->setItemData(3, i18n("The complete screen is repainted for every frame.\nCan be slow with large blurred areas."), Qt::ToolTipRole);
+    ui.glSwapStrategy->addItem(i18n("Re-use screen content"), "c");
+    ui.glSwapStrategy->setItemData(4, i18n("WARNING:\nThis strategy is usually slow with Open Source drivers.\nUndamaged pixels will be copied from GL_FRONT to GL_BACK"), Qt::ToolTipRole);
 
     connect(ui.tabWidget, SIGNAL(currentChanged(int)), this, SLOT(currentTabChanged(int)));
 
@@ -121,7 +166,7 @@ KWinCompositingConfig::KWinCompositingConfig(QWidget *parent, const QVariantList
     connect(ui.animationSpeedCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(changed()));
 
     connect(ui.compositingType, SIGNAL(currentIndexChanged(int)), this, SLOT(changed()));
-    connect(ui.compositingType, SIGNAL(currentIndexChanged(int)), this, SLOT(toogleSmoothScaleUi(int)));
+    connect(ui.compositingType, SIGNAL(currentIndexChanged(int)), this, SLOT(alignGuiToCompositingType(int)));
     connect(ui.compositingType, SIGNAL(activated(int)), this, SLOT(suggestGraphicsSystem()));
     connect(ui.graphicsSystem, SIGNAL(currentIndexChanged(int)), this, SLOT(changed()));
     connect(ui.windowThumbnails, SIGNAL(activated(int)), this, SLOT(changed()));
@@ -129,10 +174,11 @@ KWinCompositingConfig::KWinCompositingConfig(QWidget *parent, const QVariantList
     connect(ui.glScaleFilter, SIGNAL(currentIndexChanged(int)), this, SLOT(changed()));
     connect(ui.xrScaleFilter, SIGNAL(currentIndexChanged(int)), this, SLOT(changed()));
 
-    connect(ui.glVSync, SIGNAL(toggled(bool)), this, SLOT(changed()));
-    connect(ui.glShaders, SIGNAL(toggled(bool)), this, SLOT(changed()));
+    connect(ui.glSwapStrategy, SIGNAL(currentIndexChanged(int)), this, SLOT(glSwapStrategyChanged(int)));
+    connect(ui.glSwapStrategy, SIGNAL(currentIndexChanged(int)), this, SLOT(changed()));
     connect(ui.glColorCorrection, SIGNAL(toggled(bool)), this, SLOT(changed()));
     connect(m_showDetailedErrors, SIGNAL(triggered(bool)), SLOT(showDetailedEffectLoadingInformation()));
+    connect(m_dontShowAgain, SIGNAL(triggered(bool)), SLOT(blockFutureWarnings()));
     connect(ui.ghns, SIGNAL(clicked(bool)), SLOT(slotGHNS()));
 
     // Open the temporary config file
@@ -305,6 +351,11 @@ void KWinCompositingConfig::loadGeneralTab()
         ui.desktopSwitchingCombo->setCurrentIndex(3);
 }
 
+void KWinCompositingConfig::glSwapStrategyChanged(int idx)
+{
+    ui.glSwapStrategy->setToolTip(ui.glSwapStrategy->itemData(idx, Qt::ToolTipRole).toString());
+}
+
 void KWinCompositingConfig::rearmGlSupport()
 {
     // rearm config
@@ -325,13 +376,16 @@ void KWinCompositingConfig::suggestGraphicsSystem()
         ui.graphicsSystem->setCurrentIndex(0);
 }
 
-
-void KWinCompositingConfig::toogleSmoothScaleUi(int compositingType)
+void KWinCompositingConfig::alignGuiToCompositingType(int compositingType)
 {
-    ui.glScaleFilter->setVisible(compositingType == OPENGL_INDEX);
+    ui.glScaleFilter->setVisible(compositingType != XRENDER_INDEX);
     ui.xrScaleFilter->setVisible(compositingType == XRENDER_INDEX);
     ui.scaleMethodLabel->setBuddy(compositingType == XRENDER_INDEX ? ui.xrScaleFilter : ui.glScaleFilter);
-    ui.glGroup->setEnabled(compositingType == OPENGL_INDEX);
+
+    ui.glGroup->setEnabled(compositingType != XRENDER_INDEX);
+
+    ui.glColorCorrection->setEnabled(compositingType == OPENGL20_INDEX ||
+                                     compositingType == OPENGL31_INDEX);
 }
 
 void KWinCompositingConfig::toggleEffectShortcutChanged(const QKeySequence &seq)
@@ -360,7 +414,18 @@ void KWinCompositingConfig::loadAdvancedTab()
 {
     KConfigGroup config(mKWinConfig, "Compositing");
     QString backend = config.readEntry("Backend", "OpenGL");
-    ui.compositingType->setCurrentIndex((backend == "XRender") ? XRENDER_INDEX : 0);
+    if (backend == "OpenGL") {
+        int index = OPENGL20_INDEX;
+
+        if (config.readEntry<bool>("GLLegacy", false))
+            index = OPENGL12_INDEX;
+        else if (config.readEntry<bool>("GLCore", false))
+            index = OPENGL31_INDEX;
+
+        ui.compositingType->setCurrentIndex(index);
+    } else if (backend == "XRender") {
+        ui.compositingType->setCurrentIndex(XRENDER_INDEX);
+    }
 
     originalGraphicsSystem = config.readEntry("GraphicsSystem", QString());
     if (originalGraphicsSystem.isEmpty()) { // detect system default
@@ -384,11 +449,13 @@ void KWinCompositingConfig::loadAdvancedTab()
     ui.xrScaleFilter->setCurrentIndex((int)config.readEntry("XRenderSmoothScale", false));
     ui.glScaleFilter->setCurrentIndex(config.readEntry("GLTextureFilter", 2));
 
-    ui.glVSync->setChecked(config.readEntry("GLVSync", true));
-    ui.glShaders->setChecked(!config.readEntry<bool>("GLLegacy", false));
+    int swapStrategy = ui.glSwapStrategy->findData(config.readEntry("GLPreferBufferSwap", "a"));
+    if (swapStrategy < 0)
+        swapStrategy = ui.glSwapStrategy->findData("n");
+    ui.glSwapStrategy->setCurrentIndex(swapStrategy);
     ui.glColorCorrection->setChecked(config.readEntry("GLColorCorrection", false));
 
-    toogleSmoothScaleUi(ui.compositingType->currentIndex());
+    alignGuiToCompositingType(ui.compositingType->currentIndex());
 }
 
 void KWinCompositingConfig::updateStatusUI(bool compositingIsPossible)
@@ -496,10 +563,40 @@ bool KWinCompositingConfig::saveAdvancedTab()
     KConfigGroup config(mKWinConfig, "Compositing");
     QString graphicsSystem = (ui.graphicsSystem->currentIndex() == 0) ? "native" : "raster";
 
-    if (config.readEntry("Backend", "OpenGL")
-            != ((ui.compositingType->currentIndex() == OPENGL_INDEX) ? "OpenGL" : "XRender")
-            || config.readEntry("GLVSync", true) != ui.glVSync->isChecked()
-            || config.readEntry<bool>("GLLegacy", false) == ui.glShaders->isChecked()) {
+    QString backend;
+    bool glLegacy;
+    bool glCore;
+
+    switch (ui.compositingType->currentIndex()) {
+    case OPENGL12_INDEX:
+        backend  = "OpenGL";
+        glLegacy = true;
+        glCore   = false;
+        break;
+
+    case OPENGL20_INDEX:
+        backend  = "OpenGL";
+        glLegacy = false;
+        glCore   = false;
+        break;
+
+    case OPENGL31_INDEX:
+        backend  = "OpenGL";
+        glLegacy = false;
+        glCore   = true;
+        break;
+
+    case XRENDER_INDEX:
+        backend  = "XRender";
+        glLegacy = false;
+        glCore   = false;
+        break;
+    }
+
+    if (config.readEntry("Backend", "OpenGL")     != backend ||
+        config.readEntry<bool>("GLLegacy", false) != glLegacy ||
+        config.readEntry<bool>("GLCore", false)   != glCore ||
+        ((config.readEntry("GLPreferBufferSwap", "a") == "n") xor (ui.glSwapStrategy->itemData(ui.glSwapStrategy->currentIndex()) == "n"))) {
         m_showConfirmDialog = true;
         advancedChanged = true;
     } else if (config.readEntry("HiddenPreviews", 5) != hps[ ui.windowThumbnails->currentIndex()]
@@ -510,7 +607,13 @@ bool KWinCompositingConfig::saveAdvancedTab()
         advancedChanged = true;
     }
 
-    config.writeEntry("Backend", (ui.compositingType->currentIndex() == OPENGL_INDEX) ? "OpenGL" : "XRender");
+    config.writeEntry("Backend",  backend);
+
+    if (backend == "OpenGL") {
+        config.writeEntry("GLLegacy", glLegacy);
+        config.writeEntry("GLCore",   glCore);
+    }
+
     config.writeEntry("GraphicsSystem", graphicsSystem);
     config.writeEntry("HiddenPreviews", hps[ ui.windowThumbnails->currentIndex()]);
     config.writeEntry("UnredirectFullscreen", ui.unredirectFullscreen->isChecked());
@@ -518,8 +621,7 @@ bool KWinCompositingConfig::saveAdvancedTab()
     config.writeEntry("XRenderSmoothScale", ui.xrScaleFilter->currentIndex() == 1);
     config.writeEntry("GLTextureFilter", ui.glScaleFilter->currentIndex());
 
-    config.writeEntry("GLVSync", ui.glVSync->isChecked());
-    config.writeEntry("GLLegacy", !ui.glShaders->isChecked());
+    config.writeEntry("GLPreferBufferSwap", ui.glSwapStrategy->itemData(ui.glSwapStrategy->currentIndex()).toString());
     config.writeEntry("GLColorCorrection", ui.glColorCorrection->isChecked());
 
     return advancedChanged;
@@ -528,7 +630,7 @@ bool KWinCompositingConfig::saveAdvancedTab()
 void KWinCompositingConfig::save()
 {
     OrgKdeKWinInterface kwin("org.kde.KWin", "/KWin", QDBusConnection::sessionBus());
-    if (ui.compositingType->currentIndex() == OPENGL_INDEX &&
+    if (ui.compositingType->currentIndex() != XRENDER_INDEX &&
         kwin.openGLIsBroken() && !ui.rearmGlSupport->isVisible())
     {
         KConfigGroup config(mKWinConfig, "Compositing");
@@ -615,10 +717,15 @@ void KWinCompositingConfig::checkLoadedEffects()
         }
         if (!disabledEffects.isEmpty()) {
             m_showDetailedErrors->setData(disabledEffects);
+            foreach (QWidget *w, m_showDetailedErrors->associatedWidgets())
+                w->setVisible(true);
             ui.messageBox->setText(i18ncp("Error Message shown when a desktop effect could not be loaded",
                                           "One desktop effect could not be loaded.",
                                           "%1 desktop effects could not be loaded.", disabledEffects.count()));
             ui.messageBox->animatedShow();
+        } else {
+            foreach (QWidget *w, m_showDetailedErrors->associatedWidgets())
+                w->setVisible(false);
         }
     }
 }
@@ -653,7 +760,9 @@ void KWinCompositingConfig::showDetailedEffectLoadingInformation()
     label->setOpenExternalLinks(true);
     vboxLayout->addWidget(titleWidget);
     vboxLayout->addWidget(label);
-    if (compositingType != "none") {
+    if (!m_externErrorDetails.isNull()) {
+        label->setText(m_externErrorDetails);
+    } else if (compositingType != "none") {
         QString text;
         if (disabledEffects.count() > 1) {
             text = "<ul>";
@@ -716,6 +825,31 @@ void KWinCompositingConfig::showDetailedEffectLoadingInformation()
     dialog->show();
 }
 
+void KWinCompositingConfig::warn(QString message, QString details, QString dontAgainKey)
+{
+    ui.messageBox->setText(message);
+    m_dontShowAgain->setData(dontAgainKey);
+    foreach (QWidget *w, m_dontShowAgain->associatedWidgets())
+        w->setVisible(!dontAgainKey.isEmpty());
+    m_externErrorDetails = details.isNull() ? "" : details;
+    foreach (QWidget *w, m_showDetailedErrors->associatedWidgets())
+        w->setVisible(!m_externErrorDetails.isEmpty());
+    ui.messageBox->animatedShow();
+}
+
+void KWinCompositingConfig::blockFutureWarnings() {
+    QString key;
+    if (QAction *act = qobject_cast<QAction*>(sender()))
+        key = act->data().toString();
+    if (key.isEmpty())
+        return;
+    QStringList l = key.split(':', QString::SkipEmptyParts);
+    KConfig cfg(l.count() > 1 ? l.at(0) : "kwin_dialogsrc");
+    KConfigGroup(&cfg, "Notification Messages").writeEntry(l.last(), false);
+    cfg.sync();
+    ui.messageBox->animatedHide();
+}
+
 void KWinCompositingConfig::configChanged(bool reinitCompositing)
 {
     // Send signal to kwin
@@ -751,13 +885,12 @@ void KWinCompositingConfig::defaults()
 
     ui.effectSelector->defaults();
 
-    ui.compositingType->setCurrentIndex(0);
+    ui.compositingType->setCurrentIndex(OPENGL20_INDEX);
     ui.windowThumbnails->setCurrentIndex(1);
     ui.unredirectFullscreen->setChecked(false);
     ui.xrScaleFilter->setCurrentIndex(0);
     ui.glScaleFilter->setCurrentIndex(2);
-    ui.glVSync->setChecked(true);
-    ui.glShaders->setChecked(true);
+    ui.glSwapStrategy->setCurrentIndex(ui.glSwapStrategy->findData("a"));
     ui.glColorCorrection->setChecked(false);
 }
 
@@ -779,4 +912,5 @@ void KWinCompositingConfig::slotGHNS()
 
 } // namespace
 
+#include "dbus.moc"
 #include "main.moc"

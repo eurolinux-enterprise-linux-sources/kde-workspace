@@ -77,7 +77,7 @@ QList<QAction*> ProgramGroupingStrategy::strategyActions(QObject *parent, Abstra
         } else {
             a->setText(i18n("Do not allow this program to be grouped"));
         }
-        connect(a, SIGNAL(triggered()), this, SLOT(toggleGrouping()));
+        connect(a, SIGNAL(triggered()), this, SLOT(toggleGrouping()), Qt::QueuedConnection);
 
         actionList.append(a);
         d->tempItem = item;
@@ -159,7 +159,7 @@ void ProgramGroupingStrategy::untoggleGroupingOn(TaskGroup *group, const QString
     }
 
     foreach (AbstractGroupableItem * item, group->members()) {
-        if (!item->itemType() == GroupItemType && name == static_cast<TaskItem *>(item)->task()->classClass())  {
+        if (item->itemType() != GroupItemType && name == static_cast<TaskItem *>(item)->task()->classClass())  {
             if (group->parentGroup()) {
                 group->parentGroup()->add(item);
             }

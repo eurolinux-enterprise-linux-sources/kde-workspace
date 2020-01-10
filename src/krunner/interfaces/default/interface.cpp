@@ -219,6 +219,10 @@ Interface::Interface(Plasma::RunnerManager *runnerManager, QWidget *parent)
     m_delayedQueryTimer.setInterval(50);
     connect(&m_delayedQueryTimer, SIGNAL(timeout()), this, SLOT(delayedQueryLaunch()));
 
+    m_saveDialogSizeTimer.setSingleShot(true);
+    m_saveDialogSizeTimer.setInterval(1000);
+    connect(&m_saveDialogSizeTimer, SIGNAL(timeout()), SLOT(saveCurrentDialogSize()));
+
     QTimer::singleShot(0, this, SLOT(resetInterface()));
 }
 
@@ -252,7 +256,7 @@ bool Interface::eventFilter(QObject *obj, QEvent *event)
 
 void Interface::saveDialogSize(KConfigGroup &group)
 {
-    group.writeEntry("Size", size());
+    group.writeEntry("Size", m_defaultSize);
 }
 
 void Interface::restoreDialogSize(KConfigGroup &group)
@@ -314,11 +318,18 @@ void Interface::resizeEvent(QResizeEvent *event)
         } else {
             m_defaultSize = QSize(m_defaultSize.width(), size().height());
         }
+        m_saveDialogSizeTimer.start();
     }
 
     m_resultsView->resize(m_buttonContainer->width(), m_resultsView->height());
     m_resultsScene->setWidth(m_resultsView->width());
     KRunnerDialog::resizeEvent(event);
+}
+
+void Interface::saveCurrentDialogSize()
+{
+    KConfigGroup interfaceConfig(KGlobal::config(), "Interface");
+    saveDialogSize(interfaceConfig);
 }
 
 Interface::~Interface()
@@ -330,7 +341,7 @@ Interface::~Interface()
     // Before saving the size we resize to the default size, with the results container shown.
     resize(m_defaultSize);
     KConfigGroup interfaceConfig(KGlobal::config(), "Interface");
-    saveDialogSize(interfaceConfig);
+    saveCurrentDialogSize();
     KGlobal::config()->sync();
 }
 
@@ -382,6 +393,8 @@ void Interface::display(const QString &term)
     } else if (!term.isEmpty()) {
         m_searchTerm->setItemText(0, term);
         m_searchTerm->setCurrentIndex(0);
+    } else {
+        m_searchTerm->reset();
     }
 }
 
@@ -496,7 +509,12 @@ void Interface::run(ResultItem *item)
     }
 
     //TODO: check if run is succesful before adding the term to history
-    m_searchTerm->addToHistory(m_searchTerm->currentText().trimmed());
+    if ((item->group() == Plasma::QueryMatch::CompletionMatch) ||
+         (item->group() == Plasma::QueryMatch::PossibleMatch)) {
+        m_searchTerm->addToHistory(item->name());
+    } else {
+        m_searchTerm->addToHistory(m_searchTerm->currentText().trimmed());
+    }
 
     m_running = true;
     // must run the result first before clearing the interface

@@ -92,7 +92,7 @@ void ScreenSaverWindow::readSaver()
             QLatin1String( "DesktopEntryName == '" ) + entryName.toLower() + QLatin1Char( '\'' ) );
         if( offers.isEmpty() )
         {
-            kDebug(1204) << "Cannot find screesaver: " << m_saver;
+            kDebug() << "Cannot find screesaver: " << m_saver;
             return;
         }
         const QString file = KStandardDirs::locate("services", offers.first()->entryPath());
@@ -104,19 +104,19 @@ void ScreenSaverWindow::readSaver()
         foreach (const QString &type, desktopGroup.readEntry("X-KDE-Type").split(QLatin1Char(';'))) {
             if (type == QLatin1String("ManipulateScreen")) {
                 if (!manipulatescreen) {
-                    kDebug(1204) << "Screensaver is type ManipulateScreen and ManipulateScreen is forbidden";
+                    kDebug() << "Screensaver is type ManipulateScreen and ManipulateScreen is forbidden";
                     m_forbidden = true;
                 }
             } else if (type == QLatin1String("OpenGL")) {
                 m_openGLVisual = true;
                 if (!opengl) {
-                    kDebug(1204) << "Screensaver is type OpenGL and OpenGL is forbidden";
+                    kDebug() << "Screensaver is type OpenGL and OpenGL is forbidden";
                     m_forbidden = true;
                 }
             }
         }
 
-        kDebug(1204) << "m_forbidden: " << (m_forbidden ? "true" : "false");
+        kDebug() << "m_forbidden: " << (m_forbidden ? "true" : "false");
 
         if (config.hasActionGroup(QLatin1String( "InWindow" )))
         {
@@ -168,8 +168,9 @@ void ScreenSaverWindow::showEvent(QShowEvent *event)
     m_startMousePos = QPoint(-2, -2); // prevent mouse interpretation to cause an immediate hide
     m_reactivateTimer->stop();
     static Atom tag = XInternAtom(QX11Info::display(), "_KDE_SCREEN_LOCKER", False);
-    if (testAttribute(Qt::WA_WState_Created) && internalWinId())
+    if (testAttribute(Qt::WA_WState_Created) && internalWinId()) {
         XChangeProperty(QX11Info::display(), winId(), tag, tag, 32, PropModeReplace, 0, 0);
+    }
     startXScreenSaver();
 }
 
@@ -187,10 +188,9 @@ void ScreenSaverWindow::paintEvent(QPaintEvent *event)
 bool ScreenSaverWindow::startXScreenSaver()
 {
     //QString m_saverExec("kannasaver.kss --window-id=%w");
-    kDebug(1204) << "Starting hack:" << m_saverExec;
+    kDebug() << "Starting hack:" << m_saverExec;
 
-    if (m_saverExec.isEmpty() || m_forbidden)
-    {
+    if (m_saverExec.isEmpty() || m_forbidden) {
         return false;
     }
 
@@ -199,8 +199,7 @@ bool ScreenSaverWindow::startXScreenSaver()
     m_ScreenSaverProcess << KShell::splitArgs(KMacroExpander::expandMacrosShellQuote(m_saverExec, keyMap));
 
     m_ScreenSaverProcess.start();
-    if (m_ScreenSaverProcess.waitForStarted())
-    {
+    if (m_ScreenSaverProcess.waitForStarted()) {
 #ifdef HAVE_SETPRIORITY
         setpriority(PRIO_PROCESS, m_ScreenSaverProcess.pid(), mPriority);
 #endif
@@ -214,11 +213,9 @@ bool ScreenSaverWindow::startXScreenSaver()
 //
 void ScreenSaverWindow::stopXScreenSaver()
 {
-    if (m_ScreenSaverProcess.state() != QProcess::NotRunning)
-    {
+    if (m_ScreenSaverProcess.state() != QProcess::NotRunning) {
         m_ScreenSaverProcess.terminate();
-        if (!m_ScreenSaverProcess.waitForFinished(10000))
-        {
+        if (!m_ScreenSaverProcess.waitForFinished(10000)) {
             m_ScreenSaverProcess.kill();
         }
     }

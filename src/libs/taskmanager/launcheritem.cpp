@@ -226,6 +226,10 @@ void LauncherItem::launch()
     if (d->url.protocol() == "preferred") {
         KService::Ptr service = KService::serviceByStorageId(defaultApplication());
 
+        if (!service) {
+            return;
+        }
+
         QString desktopFile = KStandardDirs::locate("xdgdata-apps", service->entryPath());
         if (desktopFile.isNull()) {
             desktopFile = KStandardDirs::locate("apps", service->entryPath());
@@ -304,7 +308,7 @@ QString LauncherItem::defaultApplication() const
     } else if (application.compare("windowmanager", Qt::CaseInsensitive) == 0) {
         KConfig cfg("ksmserverrc", KConfig::NoGlobals);
         KConfigGroup confGroup(&cfg, "General");
-        return confGroup.readEntry("windowManager", QString::fromLatin1("konsole"));
+        return confGroup.readEntry("windowManager", QString::fromLatin1("kwin"));
     } else if (KService::Ptr service = KMimeTypeTrader::self()->preferredService(application)) {
         return service->storageId();
     } else {

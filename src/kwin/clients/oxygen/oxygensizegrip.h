@@ -27,7 +27,7 @@
 // IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
 
-#include <QtGui/QWidget>
+#include <QWidget>
 #include <QtGui/QPaintEvent>
 #include <QtGui/QMouseEvent>
 
@@ -43,7 +43,7 @@ namespace Oxygen
         public:
 
         //! constructor
-        SizeGrip( Client* );
+        explicit SizeGrip( Client* );
 
         //! constructor
         virtual ~SizeGrip( void );

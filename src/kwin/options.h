@@ -36,11 +36,13 @@ namespace KWin
 
 class Client;
 class CompositingPrefs;
+class Settings;
 
 class Options : public QObject, public KDecorationOptions
 {
     Q_OBJECT
     Q_ENUMS(FocusPolicy)
+    Q_ENUMS(GlSwapStrategy)
     Q_ENUMS(MouseCommand)
     Q_ENUMS(MouseWheelCommand)
 
@@ -75,10 +77,6 @@ class Options : public QObject, public KDecorationOptions
      * whether to see Xinerama screens separately for focus (in Alt+Tab, when activating next client)
      **/
     Q_PROPERTY(bool separateScreenFocus READ isSeparateScreenFocus WRITE setSeparateScreenFocus NOTIFY separateScreenFocusChanged)
-    /**
-     * whether active Xinerama screen is the one with mouse (or with the active window)
-     **/
-    Q_PROPERTY(bool activeMouseScreen READ isActiveMouseScreen WRITE setActiveMouseScreen NOTIFY activeMouseScreenChanged)
     Q_PROPERTY(int placement READ placement WRITE setPlacement NOTIFY placementChanged)
     Q_PROPERTY(bool focusPolicyIsReasonable READ focusPolicyIsReasonable NOTIFY configChanged)
     /**
@@ -134,24 +132,6 @@ class Options : public QObject, public KDecorationOptions
     */
     Q_PROPERTY(bool condensedTitle READ condensedTitle WRITE setCondensedTitle NOTIFY condensedTitleChanged)
     /**
-    * Whether electric borders are enabled. With electric borders
-    * you can change desktop by moving the mouse pointer towards the edge
-    * of the screen
-    */
-    Q_PROPERTY(bool electricBorders READ electricBorders NOTIFY electricBordersChanged)
-    /**
-    * the activation delay for electric borders in milliseconds.
-    */
-    Q_PROPERTY(int electricBorderDelay READ electricBorderDelay WRITE setElectricBorderDelay NOTIFY electricBorderDelayChanged)
-    /**
-    * the trigger cooldown for electric borders in milliseconds.
-    */
-    Q_PROPERTY(int electricBorderCooldown READ electricBorderCooldown WRITE setElectricBorderCooldown NOTIFY electricBorderCooldownChanged)
-    /**
-    * the number of pixels the mouse cursor is pushed back when it reaches the screen edge.
-    */
-    Q_PROPERTY(int electricBorderPushbackPixels READ electricBorderPushbackPixels WRITE setElectricBorderPushbackPixels NOTIFY electricBorderPushbackPixelsChanged)
-    /**
     * Whether a window gets maximized when it reaches top screen edge while being moved.
     */
     Q_PROPERTY(bool electricBorderMaximize READ electricBorderMaximize WRITE setElectricBorderMaximize NOTIFY electricBorderMaximizeChanged)
@@ -186,12 +166,11 @@ class Options : public QObject, public KDecorationOptions
      * -1 = auto
      **/
     Q_PROPERTY(int glSmoothScale READ glSmoothScale WRITE setGlSmoothScale NOTIFY glSmoothScaleChanged)
-    Q_PROPERTY(bool glVSync READ isGlVSync WRITE setGlVSync NOTIFY glVSyncChanged)
     Q_PROPERTY(bool colorCorrected READ isColorCorrected WRITE setColorCorrected NOTIFY colorCorrectedChanged)
     Q_PROPERTY(bool xrenderSmoothScale READ isXrenderSmoothScale WRITE setXrenderSmoothScale NOTIFY xrenderSmoothScaleChanged)
-    Q_PROPERTY(uint maxFpsInterval READ maxFpsInterval WRITE setMaxFpsInterval NOTIFY maxFpsIntervalChanged)
+    Q_PROPERTY(qint64 maxFpsInterval READ maxFpsInterval WRITE setMaxFpsInterval NOTIFY maxFpsIntervalChanged)
     Q_PROPERTY(uint refreshRate READ refreshRate WRITE setRefreshRate NOTIFY refreshRateChanged)
-    Q_PROPERTY(uint vBlankTime READ vBlankTime WRITE setVBlankTime NOTIFY vBlankTimeChanged)
+    Q_PROPERTY(qint64 vBlankTime READ vBlankTime WRITE setVBlankTime NOTIFY vBlankTimeChanged)
     Q_PROPERTY(bool glDirect READ isGlDirect WRITE setGlDirect NOTIFY glDirectChanged)
     Q_PROPERTY(bool glStrictBinding READ isGlStrictBinding WRITE setGlStrictBinding NOTIFY glStrictBindingChanged)
     /**
@@ -204,9 +183,11 @@ class Options : public QObject, public KDecorationOptions
      * Whether legacy OpenGL should be used or OpenGL (ES) 2
      **/
     Q_PROPERTY(bool glLegacy READ isGlLegacy WRITE setGlLegacy NOTIFY glLegacyChanged)
+    Q_PROPERTY(bool glCoreProfile READ glCoreProfile WRITE setGLCoreProfile NOTIFY glCoreProfileChanged)
+    Q_PROPERTY(GlSwapStrategy glPreferBufferSwap READ glPreferBufferSwap WRITE setGlPreferBufferSwap NOTIFY glPreferBufferSwapChanged)
 public:
 
-    Options(QObject *parent = NULL);
+    explicit Options(QObject *parent = NULL);
     ~Options();
 
     virtual unsigned long updateSettings();
@@ -296,10 +277,6 @@ public:
     // whether to see Xinerama screens separately for focus (in Alt+Tab, when activating next client)
     bool isSeparateScreenFocus() const {
         return m_separateScreenFocus;
-    }
-    // whether active Xinerama screen is the one with mouse (or with the active window)
-    bool isActiveMouseScreen() const {
-        return m_activeMouseScreen;
     }
 
     Placement::Policy placement() const {
@@ -439,7 +416,6 @@ public:
         return CmdAllModKey;
     }
 
-    static ElectricBorderAction electricBorderAction(const QString& name);
     static WindowOperation windowOperation(const QString &name, bool restricted);
     static MouseCommand mouseCommand(const QString &name, bool restricted);
     static MouseWheelCommand mouseWheelCommand(const QString &name);
@@ -454,32 +430,6 @@ public:
      */
     bool condensedTitle() const;
 
-    enum { ElectricDisabled = 0, ElectricMoveOnly = 1, ElectricAlways = 2 };
-    /**
-    * @returns The action assigned to the specified electric border
-    */
-    ElectricBorderAction electricBorderAction(ElectricBorder edge) const;
-    /**
-    * @returns true if electric borders are enabled. With electric borders
-    * you can change desktop by moving the mouse pointer towards the edge
-    * of the screen
-    */
-    int electricBorders() const;
-    /**
-    * @returns the activation delay for electric borders in milliseconds.
-    */
-    int electricBorderDelay() const;
-    /**
-    * @returns the trigger cooldown for electric borders in milliseconds.
-    */
-    int electricBorderCooldown() const;
-    /**
-    * @returns the number of pixels the mouse cursor is pushed back when it
-    * reaches the screen edge.
-    */
-    int electricBorderPushbackPixels() const {
-        return electric_border_pushback_pixels;
-    }
     /**
     * @returns true if a window gets maximized when it reaches top screen edge
     * while being moved.
@@ -559,9 +509,6 @@ public:
     int glSmoothScale() const {
         return m_glSmoothScale;
     }
-    bool isGlVSync() const {
-        return m_glVSync;
-    }
     bool isColorCorrected() const {
         return m_colorCorrected;
     }
@@ -570,14 +517,14 @@ public:
         return m_xrenderSmoothScale;
     }
 
-    uint maxFpsInterval() const {
+    qint64 maxFpsInterval() const {
         return m_maxFpsInterval;
     }
     // Settings that should be auto-detected
     uint refreshRate() const {
         return m_refreshRate;
     }
-    uint vBlankTime() const {
+    qint64 vBlankTime() const {
         return m_vBlankTime;
     }
     bool isGlDirect() const {
@@ -592,6 +539,14 @@ public:
     bool isGlLegacy() const {
         return m_glLegacy;
     }
+    bool glCoreProfile() const {
+        return m_glCoreProfile;
+    }
+
+    enum GlSwapStrategy { NoSwapEncourage = 0, CopyFrontBuffer = 'c', PaintFullScreen = 'p', ExtendDamage = 'e', AutoSwapStrategy = 'a' };
+    GlSwapStrategy glPreferBufferSwap() const {
+        return m_glPreferBufferSwap;
+    }
 
     // setters
     void setFocusPolicy(FocusPolicy focusPolicy);
@@ -603,7 +558,6 @@ public:
     void setShadeHover(bool shadeHover);
     void setShadeHoverInterval(int shadeHoverInterval);
     void setSeparateScreenFocus(bool separateScreenFocus);
-    void setActiveMouseScreen(bool activeMouseScreen);
     void setPlacement(int placement);
     void setBorderSnapZone(int borderSnapZone);
     void setWindowSnapZone(int windowSnapZone);
@@ -630,9 +584,6 @@ public:
     void setKeyCmdAllModKey(uint keyCmdAllModKey);
     void setShowGeometryTip(bool showGeometryTip);
     void setCondensedTitle(bool condensedTitle);
-    void setElectricBorderDelay(int electricBorderDelay);
-    void setElectricBorderCooldown(int electricBorderCooldown);
-    void setElectricBorderPushbackPixels(int electricBorderPushbackPixels);
     void setElectricBorderMaximize(bool electricBorderMaximize);
     void setElectricBorderTiling(bool electricBorderTiling);
     void setElectricBorderCornerRatio(float electricBorderCornerRatio);
@@ -648,76 +599,18 @@ public:
     void setHiddenPreviews(int hiddenPreviews);
     void setUnredirectFullscreen(bool unredirectFullscreen);
     void setGlSmoothScale(int glSmoothScale);
-    void setGlVSync(bool glVSync);
-    void setColorCorrected(bool colorCorrected);
     void setXrenderSmoothScale(bool xrenderSmoothScale);
-    void setMaxFpsInterval(uint maxFpsInterval);
+    void setMaxFpsInterval(qint64 maxFpsInterval);
     void setRefreshRate(uint refreshRate);
-    void setVBlankTime(uint vBlankTime);
+    void setVBlankTime(qint64 vBlankTime);
     void setGlDirect(bool glDirect);
     void setGlStrictBinding(bool glStrictBinding);
     void setGlStrictBindingFollowsDriver(bool glStrictBindingFollowsDriver);
     void setGlLegacy(bool glLegacy);
+    void setGLCoreProfile(bool glCoreProfile);
+    void setGlPreferBufferSwap(char glPreferBufferSwap);
 
     // default values
-    static FocusPolicy defaultFocusPolicy() {
-        return ClickToFocus;
-    }
-    static bool defaultNextFocusPrefersMouse() {
-        return false;
-    }
-    static bool defaultClickRaise() {
-        return true;
-    }
-    static bool defaultAutoRaise() {
-        return false;
-    }
-    static int defaultAutoRaiseInterval() {
-        return 0;
-    }
-    static int defaultDelayFocusInterval() {
-        return 0;
-    }
-    static bool defaultShadeHover() {
-        return false;
-    }
-    static int defaultShadeHoverInterval() {
-        return 250;
-    }
-    static bool defaultSeparateScreenFocus() {
-        return false;
-    }
-    static bool defaultActiveMouseScreen() {
-        // TODO: used to be m_focusPolicy != ClickToFocus
-        return true;
-    }
-    static Placement::Policy defaultPlacement() {
-        return Placement::Default;
-    }
-    static int defaultBorderSnapZone() {
-        return 10;
-    }
-    static int defaultWindowSnapZone() {
-        return 10;
-    }
-    static int defaultCenterSnapZone() {
-        return 0;
-    }
-    static bool defaultSnapOnlyWhenOverlapping() {
-        return false;
-    }
-    static bool defaultShowDesktopIsMinimizeAll() {
-        return false;
-    }
-    static bool defaultRollOverDesktops() {
-        return true;
-    }
-    static int defaultFocusStealingPreventionLevel() {
-        return 1;
-    }
-    static bool defaultLegacyFullscreenSupport() {
-        return false;
-    }
     static WindowOperation defaultOperationTitlebarDblClick() {
         return MaximizeOp;
     }
@@ -769,72 +662,6 @@ public:
     static uint defaultKeyCmdAllModKey() {
         return Qt::Key_Alt;
     }
-    static bool defaultShowGeometryTip() {
-        return false;
-    }
-    static bool defaultCondensedTitle() {
-        return false;
-    }
-    static ElectricBorderAction defaultElectricBorderTop() {
-        return ElectricActionNone;
-    }
-    static ElectricBorderAction defaultElectricBorderTopRight() {
-        return ElectricActionNone;
-    }
-    static ElectricBorderAction defaultElectricBorderRight() {
-        return ElectricActionNone;
-    }
-    static ElectricBorderAction defaultElectricBorderBottomRight() {
-        return ElectricActionNone;
-    }
-    static ElectricBorderAction defaultElectricBorderBottom() {
-        return ElectricActionNone;
-    }
-    static ElectricBorderAction defaultElectricBorderBottomLeft() {
-        return ElectricActionNone;
-    }
-    static ElectricBorderAction defaultElectricBorderLeft() {
-        return ElectricActionNone;
-    }
-    static ElectricBorderAction defaultElectricBorderTopLeft() {
-        return ElectricActionNone;
-    }
-    static int defaultElectricBorders() {
-        return 0;
-    }
-    static int defaultElectricBorderDelay() {
-        return 150;
-    }
-    static int defaultElectricBorderCooldown() {
-        return 350;
-    }
-    static int defaultElectricBorderPushbackPixels() {
-        return 1;
-    }
-    static bool defaultElectricBorderMaximize() {
-        return true;
-    }
-    static bool defaultElectricBorderTiling() {
-        return true;
-    }
-    static float defaultElectricBorderCornerRatio() {
-        return 0.25;
-    }
-    static bool defaultBorderlessMaximizedWindows() {
-        return false;
-    }
-    static int defaultKillPingTimeout() {
-        return 5000;
-    }
-    static bool defaultHideUtilityWindowsForInactive() {
-        return true;
-    }
-    static bool defaultInactiveTabsSkipTaskbar() {
-        return false;
-    }
-    static bool defaultAutogroupSimilarWindows() {
-        return false;
-    }
     static bool defaultAutogroupInForeground() {
         return true;
     }
@@ -856,17 +683,14 @@ public:
     static int defaultGlSmoothScale() {
         return 2;
     }
-    static bool defaultGlVSync() {
-        return true;
-    }
     static bool defaultColorCorrected() {
         return false;
     }
     static bool defaultXrenderSmoothScale() {
         return false;
     }
-    static uint defaultMaxFpsInterval() {
-        return qRound(1000.0/60.0);
+    static qint64 defaultMaxFpsInterval() {
+        return (1 * 1000 * 1000 * 1000) /60.0; // nanoseconds / Hz
     }
     static int defaultMaxFps() {
         return 60;
@@ -875,7 +699,7 @@ public:
         return 0;
     }
     static uint defaultVBlankTime() {
-        return 6144;
+        return 6000; // 6ms
     }
     static bool defaultGlDirect() {
         return true;
@@ -888,6 +712,12 @@ public:
     }
     static bool defaultGlLegacy() {
         return false;
+    }
+    static bool defaultGLCoreProfile() {
+        return false;
+    }
+    static GlSwapStrategy defaultGlPreferBufferSwap() {
+        return AutoSwapStrategy;
     }
     static int defaultAnimationSpeed() {
         return 3;
@@ -916,15 +746,14 @@ Q_SIGNALS:
     void delayFocusIntervalChanged();
     void shadeHoverChanged();
     void shadeHoverIntervalChanged();
-    void separateScreenFocusChanged();
-    void activeMouseScreenChanged();
+    void separateScreenFocusChanged(bool);
     void placementChanged();
     void borderSnapZoneChanged();
     void windowSnapZoneChanged();
     void centerSnapZoneChanged();
     void snapOnlyWhenOverlappingChanged();
     void showDesktopIsMinimizeAllChanged();
-    void rollOverDesktopsChanged();
+    void rollOverDesktopsChanged(bool enabled);
     void focusStealingPreventionLevelChanged();
     void legacyFullscreenSupportChanged();
     void operationTitlebarDblClickChanged();
@@ -944,10 +773,6 @@ Q_SIGNALS:
     void keyCmdAllModKeyChanged();
     void showGeometryTipChanged();
     void condensedTitleChanged();
-    void electricBordersChanged();
-    void electricBorderDelayChanged();
-    void electricBorderCooldownChanged();
-    void electricBorderPushbackPixelsChanged();
     void electricBorderMaximizeChanged();
     void electricBorderTilingChanged();
     void electricBorderCornerRatioChanged();
@@ -963,7 +788,6 @@ Q_SIGNALS:
     void hiddenPreviewsChanged();
     void unredirectFullscreenChanged();
     void glSmoothScaleChanged();
-    void glVSyncChanged();
     void colorCorrectedChanged();
     void xrenderSmoothScaleChanged();
     void maxFpsIntervalChanged();
@@ -973,9 +797,16 @@ Q_SIGNALS:
     void glStrictBindingChanged();
     void glStrictBindingFollowsDriverChanged();
     void glLegacyChanged();
+    void glCoreProfileChanged();
+    void glPreferBufferSwapChanged();
+
+public Q_SLOTS:
+    void setColorCorrected(bool colorCorrected = false);
 
 private:
     void setElectricBorders(int borders);
+    void syncFromKcfgc();
+    QScopedPointer<Settings> m_settings;
     FocusPolicy m_focusPolicy;
     bool m_nextFocusPrefersMouse;
     bool m_clickRaise;
@@ -985,7 +816,6 @@ private:
     bool m_shadeHover;
     int m_shadeHoverInterval;
     bool m_separateScreenFocus;
-    bool m_activeMouseScreen;
     Placement::Policy m_placement;
     int m_borderSnapZone;
     int m_windowSnapZone;
@@ -1007,17 +837,18 @@ private:
     HiddenPreviews m_hiddenPreviews;
     bool m_unredirectFullscreen;
     int m_glSmoothScale;
-    bool m_glVSync;
     bool m_colorCorrected;
     bool m_xrenderSmoothScale;
-    uint m_maxFpsInterval;
+    qint64 m_maxFpsInterval;
     // Settings that should be auto-detected
     uint m_refreshRate;
-    uint m_vBlankTime;
+    qint64 m_vBlankTime;
     bool m_glDirect;
     bool m_glStrictBinding;
     bool m_glStrictBindingFollowsDriver;
     bool m_glLegacy;
+    bool m_glCoreProfile;
+    GlSwapStrategy m_glPreferBufferSwap;
 
     WindowOperation OpTitlebarDblClick;
 
@@ -1039,18 +870,6 @@ private:
     MouseWheelCommand CmdAllWheel;
     uint CmdAllModKey;
 
-    ElectricBorderAction electric_border_top;
-    ElectricBorderAction electric_border_top_right;
-    ElectricBorderAction electric_border_right;
-    ElectricBorderAction electric_border_bottom_right;
-    ElectricBorderAction electric_border_bottom;
-    ElectricBorderAction electric_border_bottom_left;
-    ElectricBorderAction electric_border_left;
-    ElectricBorderAction electric_border_top_left;
-    int electric_borders;
-    int electric_border_delay;
-    int electric_border_cooldown;
-    int electric_border_pushback_pixels;
     bool electric_border_maximize;
     bool electric_border_tiling;
     float electric_border_corner_ratio;

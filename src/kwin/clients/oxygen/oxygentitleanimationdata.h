@@ -30,10 +30,10 @@
 #include "oxygenanimation.h"
 
 #include <cassert>
-#include <QtCore/QObject>
-#include <QtCore/QWeakPointer>
-#include <QtCore/QBasicTimer>
-#include <QtCore/QTimerEvent>
+#include <QObject>
+#include <QWeakPointer>
+#include <QBasicTimer>
+#include <QTimerEvent>
 #include <QtGui/QPixmap>
 
 
@@ -53,7 +53,7 @@ namespace Oxygen
         typedef QWeakPointer<TitleAnimationData> Pointer;
 
         //! constructor
-        TitleAnimationData( QObject* );
+        explicit TitleAnimationData( QObject* );
 
         //! reset
         void reset( void )

@@ -23,7 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QEasingCurve>
 #include <QElapsedTimer>
-#include <QtCore/qmath.h>
+#include <qmath.h>
 #include <kwineffects.h>
 
 
@@ -33,13 +33,13 @@ namespace KWin
 class KWIN_EXPORT FPx2 {
 public:
     FPx2() { f[0] = f[1] = 0.0; valid = false; }
-    FPx2(float v) { f[0] = f[1] = v; valid = true; }
+    explicit FPx2(float v) { f[0] = f[1] = v; valid = true; }
     FPx2(float v1, float v2) { f[0] = v1; f[1] = v2; valid = true; }
     FPx2(const FPx2 &other) { f[0] = other.f[0]; f[1] = other.f[1]; valid = other.valid; }
-    FPx2(const QPoint &other) { f[0] = other.x(); f[1] = other.y(); valid = true; }
-    FPx2(const QPointF &other) { f[0] = other.x(); f[1] = other.y(); valid = true; }
-    FPx2(const QSize &other) { f[0] = other.width(); f[1] = other.height(); valid = true; }
-    FPx2(const QSizeF &other) { f[0] = other.width(); f[1] = other.height(); valid = true; }
+    explicit FPx2(const QPoint &other) { f[0] = other.x(); f[1] = other.y(); valid = true; }
+    explicit FPx2(const QPointF &other) { f[0] = other.x(); f[1] = other.y(); valid = true; }
+    explicit FPx2(const QSize &other) { f[0] = other.width(); f[1] = other.height(); valid = true; }
+    explicit FPx2(const QSizeF &other) { f[0] = other.width(); f[1] = other.height(); valid = true; }
     inline void invalidate() { valid = false; }
     inline bool isValid() const { return valid; }
     inline float operator[](int n) const { return f[n]; }
@@ -81,6 +81,7 @@ public:
 
     inline void set(float v) { f[0] = v; valid = true; }
     inline void set(float v1, float v2) { f[0] = v1; f[1] = v2; valid = true; }
+
 private:
     float f[2];
     bool valid;
@@ -98,8 +99,8 @@ public:
     enum Anchor { Left = 1<<0, Top = 1<<1, Right = 1<<2, Bottom = 1<<3,
                   Horizontal = Left|Right, Vertical = Top|Bottom, Mouse = 1<<4  };
     enum Attribute {
-        Opacity = 0, Brightness, Saturation, Scale, Rotation,
-        Position, Size, Translation, Clip, Generic,
+        Opacity = 0, Brightness, Saturation, Scale, Rotation, DecorationOpacity,
+        Position, Size, Translation, Clip, Generic, CrossFadePrevious,
         NonFloatBase = Position
     };
     enum MetaType { SourceAnchor, TargetAnchor,
@@ -125,6 +126,7 @@ public:
     /**
      * Reimplemented from KWIn::Effect
      */
+    QString debug(const QString &parameter) const;
     virtual void prePaintScreen( ScreenPrePaintData& data, int time );
     virtual void prePaintWindow( EffectWindow* w, WindowPrePaintData& data, int time );
     virtual void paintWindow( EffectWindow* w, int mask, QRegion region, WindowPaintData& data );
@@ -155,13 +157,32 @@ protected:
      * @param shape - How the animation progresses, eg. Linear progresses constantly while Exponential start slow and becomes very fast in the end
      * @param delay - When the animation will start compared to "now" (the window will remain at the "from" position until then)
      * @param from - the starting value, the default is invalid, ie. the attribute for the window is not transformed in the beginning
+     * @return an ID that you can use to cancel a running animation
      */
-    void animate( EffectWindow *w, Attribute a, uint meta, int ms, FPx2 to, QEasingCurve curve = QEasingCurve(), int delay = 0, FPx2 from = FPx2() );
+    quint64 animate( EffectWindow *w, Attribute a, uint meta, int ms, FPx2 to, QEasingCurve curve = QEasingCurve(), int delay = 0, FPx2 from = FPx2() )
+    { return p_animate(w, a, meta, ms, to, curve, delay, from, false); }
+
+    /**
+     * Equal to ::animate() with one important difference:
+     * The target value for the attribute is kept until you ::cancel() this animation
+     * @return an ID that you need to use to cancel this manipulation
+     */
+    quint64 set( EffectWindow *w, Attribute a, uint meta, int ms, FPx2 to, QEasingCurve curve = QEasingCurve(), int delay = 0, FPx2 from = FPx2() )
+    { return p_animate(w, a, meta, ms, to, curve, delay, from, true); }
+
     /**
      * Called whenever an animation end, passes the transformed @class EffectWindow @enum Attribute and originally supplied @param meta
      * You can reimplement it to keep a constant transformation for the window (ie. keep it a this opacity or position) or to start another animation
      */
     virtual void animationEnded( EffectWindow *, Attribute, uint meta ) {Q_UNUSED(meta);}
+
+    /**
+     * Cancel a running animation. @return true if an animation for @p animationId was found (and canceled)
+     * NOTICE that there is NO animated reset of the original value. You'll have to provide that with a second animation
+     * NOTICE as well that this will eventually release a Deleted window.
+     * If you intend to run another animation on the (Deleted) window, you have to do that before cancelling the old animation (to keep the window around)
+     */
+    bool cancel(quint64 animationId);
     /**
      * Called if the transformed @enum Attribute is Generic. You should reimplement it if you transform this "Attribute".
      * You could use the meta information to eg. support more than one additional animations
@@ -170,6 +191,7 @@ protected:
     {Q_UNUSED(w); Q_UNUSED(data); Q_UNUSED(progress); Q_UNUSED(meta);}
 
 private:
+    quint64 p_animate( EffectWindow *w, Attribute a, uint meta, int ms, FPx2 to, QEasingCurve curve, int delay, FPx2 from, bool keepAtTarget );
     QRect clipRect(const QRect &windowRect, const AniData&) const;
     void clipWindow(const EffectWindow *, const AniData &, WindowQuadList &) const;
     float interpolated( const AniData&, int i = 0 ) const;
@@ -191,6 +213,7 @@ private:
 
 
 } // namespace
+QDebug operator<<(QDebug dbg, const KWin::FPx2 &fpx2);
 Q_DECLARE_METATYPE(KWin::FPx2)
 
 #endif // ANIMATION_EFFECT_H

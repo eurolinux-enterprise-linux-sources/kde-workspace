@@ -3,7 +3,7 @@
 // animation configuration item
 // -------------------
 //
-// Copyright (c) 2010 Hugo Pereira Da Costa <hugo@oxygen-icons.org>
+// Copyright (c) 2010 Hugo Pereira Da Costa <hugo.pereira@free.fr>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
@@ -29,6 +29,7 @@
 #include <KApplication>
 #include <KIcon>
 #include <KAboutData>
+#include <config-workspace.h>
 
 int main(int argc, char *argv[])
 {
@@ -36,12 +37,12 @@ int main(int argc, char *argv[])
         "oxygen-settings",
         "kstyle_config",
         ki18n( "Oxygen Settings" ),
-        KDE_VERSION_STRING,
+        WORKSPACE_VERSION_STRING,
         ki18n( "Oxygen expert configuration tool" ),
         KAboutData::License_GPL_V2,
         ki18n( "(c) 2010, Hugo Pereira Da Costa" ));
 
-    aboutData.addAuthor( ki18n( "Hugo Pereira Da Costa" ),KLocalizedString(), "hugo@oxygen-icons.org" );
+    aboutData.addAuthor( ki18n( "Hugo Pereira Da Costa" ),KLocalizedString(), "hugo.pereira@free.fr" );
 
     KCmdLineArgs::init( argc, argv, &aboutData );
     KApplication app;

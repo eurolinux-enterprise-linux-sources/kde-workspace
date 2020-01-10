@@ -2,7 +2,7 @@
  KWin - the KDE window manager
  This file is part of the KDE project.
 
-Copyright (C) 2009 Martin Gräßlin <kde@martin-graesslin.com>
+Copyright (C) 2009 Martin Gräßlin <mgraesslin@kde.org>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -33,6 +33,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <X11/Xlib.h>
 // KDE
 #include <KDebug>
+#include <KProcess>
 #include <KWindowSystem>
 
 namespace KWin
@@ -47,10 +48,6 @@ public:
 
     ~TabBoxHandlerPrivate();
 
-    /**
-    * Updates the currently shown outline.
-    */
-    void updateOutline();
     /**
     * Updates the current highlight window state
     */
@@ -73,7 +70,6 @@ public:
     QModelIndex index;
     /**
     * Indicates if the tabbox is shown.
-    * Used to determine if the outline has to be updated, etc.
     */
     bool isShown;
     TabBoxClient *lastRaisedClient, *lastRaisedClientSucc;
@@ -115,23 +111,6 @@ DesktopModel* TabBoxHandlerPrivate::desktopModel() const
     return m_desktopModel;
 }
 
-void TabBoxHandlerPrivate::updateOutline()
-{
-    if (config.tabBoxMode() != TabBoxConfig::ClientTabBox)
-        return;
-//     if ( c == NULL || !m_isShown || !c->isShown( true ) || !c->isOnCurrentDesktop())
-    if (!isShown) {
-        q->hideOutline();
-        return;
-    }
-    const QVariant client = m_clientModel->data(index, ClientModel::ClientRole);
-    if (!client.isValid()) {
-        return;
-    }
-    TabBoxClient* c = static_cast< TabBoxClient* >(client.value<void *>());
-    q->showOutline(QRect(c->x(), c->y(), c->width(), c->height()));
-}
-
 void TabBoxHandlerPrivate::updateHighlightWindows()
 {
     if (!isShown || config.tabBoxMode() != TabBoxConfig::ClientTabBox)
@@ -144,7 +123,7 @@ void TabBoxHandlerPrivate::updateHighlightWindows()
         w = m_declarativeView;
     }
 
-    if (KWindowSystem::compositingActive()) {
+    if (q->isKWinCompositing()) {
         if (lastRaisedClient)
             q->elevateClient(lastRaisedClient, m_declarativeView ? m_declarativeView->winId() : 0, false);
         lastRaisedClient = currentClient;
@@ -185,13 +164,6 @@ void TabBoxHandlerPrivate::updateHighlightWindows()
         data.resize(1);
     }
     data[ 0 ] = currentClient ? currentClient->window() : 0L;
-    if (config.isShowOutline()) {
-        QVector<Window> outlineWindows = q->outlineWindowIds();
-        data.resize(2+outlineWindows.size());
-        for (int i=0; i<outlineWindows.size(); ++i) {
-            data[2+i] = outlineWindows[i];
-        }
-    }
     Atom atom = XInternAtom(dpy, "_KDE_WINDOW_HIGHLIGHT", False);
     XChangeProperty(dpy, wId, atom, atom, 32, PropModeReplace,
                     reinterpret_cast<unsigned char *>(data.data()), data.size());
@@ -244,24 +216,30 @@ void TabBoxHandler::show()
     d->isShown = true;
     d->lastRaisedClient = 0;
     d->lastRaisedClientSucc = 0;
-    // show the outline
-    if (d->config.isShowOutline()) {
-        d->updateOutline();
-    }
     if (d->config.isShowTabBox()) {
+        DeclarativeView *dv(NULL);
         if (d->config.tabBoxMode() == TabBoxConfig::ClientTabBox) {
             // use declarative view
             if (!d->m_declarativeView) {
                 d->m_declarativeView = new DeclarativeView(d->clientModel(), TabBoxConfig::ClientTabBox);
             }
-            d->m_declarativeView->show();
-            d->m_declarativeView->setCurrentIndex(d->index, true);
+            dv = d->m_declarativeView;
         } else {
             if (!d->m_declarativeDesktopView) {
                 d->m_declarativeDesktopView = new DeclarativeView(d->desktopModel(), TabBoxConfig::DesktopTabBox);
             }
-            d->m_declarativeDesktopView->show();
-            d->m_declarativeDesktopView->setCurrentIndex(d->index);
+            dv = d->m_declarativeDesktopView;
+        }
+        if (dv->status() == QDeclarativeView::Ready && dv->rootObject()) {
+            dv->show();
+            dv->setCurrentIndex(d->index, d->config.tabBoxMode() == TabBoxConfig::ClientTabBox);
+        } else {
+            QStringList args;
+            args << "--passivepopup" << /*i18n*/("The Window Switcher installation is broken, resources are missing.\n"
+                                                 "Contact your distribution about this.") << "20";
+            KProcess::startDetached("kdialog", args);
+            hide();
+            return;
         }
     }
     if (d->config.isHighlightWindows()) {
@@ -284,9 +262,6 @@ void TabBoxHandler::hide(bool abort)
     d->isShown = false;
     if (d->config.isHighlightWindows()) {
         d->endHighlightWindows(abort);
-    }
-    if (d->config.isShowOutline()) {
-        hideOutline();
     }
     if (d->m_declarativeView) {
         d->m_declarativeView->hide();
@@ -388,9 +363,6 @@ void TabBoxHandler::setCurrentIndex(const QModelIndex& index)
     }
     d->index = index;
     if (d->config.tabBoxMode() == TabBoxConfig::ClientTabBox) {
-        if (d->config.isShowOutline()) {
-            d->updateOutline();
-        }
         if (d->config.isHighlightWindows()) {
             d->updateHighlightWindows();
         }
@@ -455,7 +427,7 @@ void TabBoxHandler::createModel(bool partialReset)
         // TODO: C++11 use lambda function
         bool lastRaised = false;
         bool lastRaisedSucc = false;
-        foreach (QWeakPointer<TabBoxClient> clientPointer, stackingOrder()) {
+        foreach (const QWeakPointer<TabBoxClient> &clientPointer, stackingOrder()) {
             QSharedPointer<TabBoxClient> client = clientPointer.toStrongRef();
             if (!client) {
                 continue;

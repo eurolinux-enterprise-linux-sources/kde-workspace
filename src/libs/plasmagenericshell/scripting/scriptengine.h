@@ -65,6 +65,7 @@ Q_SIGNALS:
 
 private:
     void setupEngine();
+    static QString onlyExec(const QString &commandLine);
 
     // containment accessors
     static QStringList availableContainments(const QString &type);
@@ -82,6 +83,7 @@ private:
     static QScriptValue applicationPath(QScriptContext *context, QScriptEngine *engine);
     static QScriptValue userDataPath(QScriptContext *context, QScriptEngine *engine);
     static QScriptValue knownWallpaperPlugins(QScriptContext *context, QScriptEngine *engine);
+    static QScriptValue configFile(QScriptContext *context, QScriptEngine *engine);
 
     // helpers
     static QScriptValue createContainment(const QString &type, const QString &defautPlugin,
@@ -95,7 +97,7 @@ private:
     QScriptValue m_scriptSelf;
 };
 
-static const int PLASMA_DESKTOP_SCRIPTING_VERSION = 4;
+static const int PLASMA_DESKTOP_SCRIPTING_VERSION = 7;
 }
 
 #endif

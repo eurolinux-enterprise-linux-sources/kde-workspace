@@ -60,6 +60,7 @@
 SearchLaunch::SearchLaunch(QObject *parent, const QVariantList &args)
     : Containment(parent, args),
       m_runnerModel(0),
+      m_serviceModel(0),
       m_backButton(0),
       m_queryCounter(0),
       m_maxColumnWidth(0),
@@ -260,8 +261,7 @@ void SearchLaunch::configChanged()
 
     m_resultsView->setIconSize(config().readEntry("ResultsIconSize", (int)KIconLoader::SizeHuge));
 
-    QString packageManagerName = config().readEntry("PackageManager", "kpackagekit");
-
+    const QString packageManagerName = config().readEntry("PackageManager", "kpackagekit");
     if (!packageManagerName.isEmpty()) {
         m_packageManagerService = KService::serviceByDesktopName(packageManagerName);
 
@@ -275,6 +275,12 @@ void SearchLaunch::configChanged()
             connect(addApplicationsAction, SIGNAL(triggered()), this, SLOT(launchPackageManager()));
         }
     }
+
+    if (m_serviceModel) {
+        m_serviceModel->setPath("/");
+    }
+    restoreStrip();
+    m_stripUninitialized = false;
 }
 
 void SearchLaunch::availableScreenRegionChanged()
@@ -568,7 +574,7 @@ void SearchLaunch::restoreStrip()
 {
     KConfigGroup cg = config();
     m_stripWidget->restore(cg);
-    reset();
+    //reset();
 }
 
 void SearchLaunch::updateConfigurationMode(bool config)

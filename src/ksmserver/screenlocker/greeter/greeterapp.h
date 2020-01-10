@@ -43,33 +43,42 @@ public:
     virtual ~UnlockApp();
 
     void setTesting(bool enable);
+    void setImmediateLock(bool immediateLock);
+    void lockImmediately();
+
+public Q_SLOTS:
+    void desktopResized();
 
 protected:
     virtual bool eventFilter(QObject *obj, QEvent *event);
 
 private Q_SLOTS:
     void viewStatusChanged(const QDeclarativeView::Status &status);
-    void desktopResized();
     void resetRequestIgnore();
     void suspendToRam();
     void suspendToDisk();
     void shutdown();
     void getFocus();
+    void setLockedPropertyOnViews();
 
 private:
     void initialize();
     void capsLocked();
+    void shareEvent(QEvent *e, QDeclarativeView *from);
 
     QString m_mainQmlPath;
     QList<QDeclarativeView*> m_views;
     QList<ScreenSaverWindow*> m_screensaverWindows;
     QTimer *m_resetRequestIgnoreTimer;
+    QTimer *m_delayedLockTimer;
     Plasma::PackageStructure::Ptr m_structure;
     Plasma::Package *m_package;
     bool m_testing;
     bool m_capsLocked;
     bool m_ignoreRequests;
     bool m_showScreenSaver;
+    bool m_immediateLock;
+    bool m_runtimeInitialized;
 };
 } // namespace
 

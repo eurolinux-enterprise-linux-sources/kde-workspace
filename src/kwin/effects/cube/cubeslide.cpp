@@ -2,7 +2,7 @@
  KWin - the KDE window manager
  This file is part of the KDE project.
 
- Copyright (C) 2009 Martin Gräßlin <kde@martin-graesslin.com>
+ Copyright (C) 2009 Martin Gräßlin <mgraesslin@kde.org>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "cubeslideconfig.h"
 
 #include <kwinconfig.h>
+#include <QVector3D>
 
 #include <math.h>
 
@@ -519,6 +520,8 @@ void CubeSlideEffect::slotWindowStepUserMovedResized(EffectWindow* w)
 {
     if (!useWindowMoving)
         return;
+    if (!effects->kwinOption(SwitchDesktopOnScreenEdgeMovingWindows).toBool())
+        return;
     if (w->isUserResize())
         return;
     const QPoint cursor = effects->cursorPos();
@@ -555,6 +558,8 @@ void CubeSlideEffect::slotWindowStepUserMovedResized(EffectWindow* w)
 void CubeSlideEffect::slotWindowFinishUserMovedResized(EffectWindow* w)
 {
     if (!useWindowMoving)
+        return;
+    if (!effects->kwinOption(SwitchDesktopOnScreenEdgeMovingWindows).toBool())
         return;
     if (w->isUserResize())
         return;

@@ -1,0 +1,5163 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 992b8f6..27317c3 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -178,7 +178,7 @@ set_package_properties(Akonadi PROPERTIES DESCRIPTION "An extensible cross-deskt
+                        PURPOSE "Required to build certain Plasma DataEngines (Akonadi, Calendar)"
+                       )
+ 
+-macro_optional_find_package(KdepimLibs 4.10.68 QUIET CONFIG)
++macro_optional_find_package(KdepimLibs 4.5.60 QUIET CONFIG)
+ set_package_properties(KdepimLibs PROPERTIES DESCRIPTION "The KDEPIM libraries"
+                        URL "http://pim.kde.org"
+                        TYPE OPTIONAL
+diff --git a/plasma/generic/dataengines/calendar/CMakeLists.txt b/plasma/generic/dataengines/calendar/CMakeLists.txt
+index 6ad3b61..5539f99 100644
+--- a/plasma/generic/dataengines/calendar/CMakeLists.txt
++++ b/plasma/generic/dataengines/calendar/CMakeLists.txt
+@@ -15,6 +15,13 @@ if(Akonadi_FOUND)
+     ADD_DEFINITIONS(-DAKONADI_FOUND)
+     set(calendar_engine_srcs ${calendar_engine_srcs}
+         eventdatacontainer.cpp
++        # taken from kdepim/akonadi/kcal as long as it's not yet exported:
++        akonadi/calendar.cpp
++        akonadi/calendarmodel.cpp
++        akonadi/calfilterproxymodel.cpp
++        akonadi/utils.cpp
++        akonadi/blockalarmsattribute.cpp
++        akonadi/collectionselection.cpp
+     )
+ endif(Akonadi_FOUND)
+ 
+@@ -33,7 +40,6 @@ target_link_libraries(
+ if(Akonadi_FOUND)
+     target_link_libraries(
+         plasma_engine_calendar
+-        akonadi-calendar
+         ${KDE4_AKONADI_LIBS}
+         ${KDEPIMLIBS_AKONADI_KCAL_LIBS}
+     )
+diff --git a/plasma/generic/dataengines/calendar/akonadi/README.txt b/plasma/generic/dataengines/calendar/akonadi/README.txt
+new file mode 100644
+index 0000000..dc1d36c
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/README.txt
+@@ -0,0 +1,5 @@
++These files have been copied from trunk kdepim/calendarsupport as at 2011-02-27 and should be kept in sync for bug fixes.
++
++Note that the exports have been removed from the headers, but no other changes have been made.
++
++These classes will be moved from kdepim to kdepimlibs in KDE SC 4.7 and this copy should be deleted when this happens.  At this time it is recommended to move the calendar events dataengine logic into the akonadi dataengine.
+diff --git a/plasma/generic/dataengines/calendar/akonadi/blockalarmsattribute.cpp b/plasma/generic/dataengines/calendar/akonadi/blockalarmsattribute.cpp
+new file mode 100644
+index 0000000..28dff0c
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/blockalarmsattribute.cpp
+@@ -0,0 +1,55 @@
++/*
++    Copyright (C) 2010 Klarälvdalens Datakonsult AB,
++        a KDAB Group company, info@kdab.net,
++        author Tobias Koenig <tokoe@kdab.com>
++
++    This library is free software; you can redistribute it and/or modify it
++    under the terms of the GNU Library General Public License as published by
++    the Free Software Foundation; either version 2 of the License, or (at your
++    option) any later version.
++
++    This library is distributed in the hope that it will be useful, but WITHOUT
++    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Library General Public
++    License for more details.
++
++    You should have received a copy of the GNU Library General Public License
++    along with this library; see the file COPYING.LIB.  If not, write to the
++    Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++    02110-1301, USA.
++*/
++
++#include "blockalarmsattribute.h"
++
++#include <QtCore/QByteArray>
++
++using namespace CalendarSupport;
++
++BlockAlarmsAttribute::BlockAlarmsAttribute()
++{
++}
++
++BlockAlarmsAttribute::~BlockAlarmsAttribute()
++{
++}
++
++QByteArray BlockAlarmsAttribute::type() const
++{
++  return "BlockAlarmsAttribute";
++}
++
++BlockAlarmsAttribute* BlockAlarmsAttribute::clone() const
++{
++  return new BlockAlarmsAttribute();
++}
++
++QByteArray BlockAlarmsAttribute::serialized() const
++{
++  return QByteArray();
++}
++
++void BlockAlarmsAttribute::deserialize( const QByteArray &data )
++{
++  Q_ASSERT( data.isEmpty() );
++  Q_UNUSED( data );
++}
+diff --git a/plasma/generic/dataengines/calendar/akonadi/blockalarmsattribute.h b/plasma/generic/dataengines/calendar/akonadi/blockalarmsattribute.h
+new file mode 100644
+index 0000000..71c8284
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/blockalarmsattribute.h
+@@ -0,0 +1,74 @@
++/*
++    Copyright (C) 2010 Klarälvdalens Datakonsult AB,
++        a KDAB Group company, info@kdab.net,
++        author Tobias Koenig <tokoe@kdab.com>
++
++    This library is free software; you can redistribute it and/or modify it
++    under the terms of the GNU Library General Public License as published by
++    the Free Software Foundation; either version 2 of the License, or (at your
++    option) any later version.
++
++    This library is distributed in the hope that it will be useful, but WITHOUT
++    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Library General Public
++    License for more details.
++
++    You should have received a copy of the GNU Library General Public License
++    along with this library; see the file COPYING.LIB.  If not, write to the
++    Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++    02110-1301, USA.
++*/
++
++#ifndef CALENDARSUPPORT_BLOCKALARMSATTRIBUTE_H
++#define CALENDARSUPPORT_BLOCKALARMSATTRIBUTE_H
++
++#include <akonadi/attribute.h>
++
++namespace CalendarSupport {
++
++/**
++ * @short An Attribute that marks that alarms from an calendar collection are blocked.
++ *
++ * A calendar collection which has this attribute set won't be evaluated by korgac and
++ * therefor its alarms won't be used.
++ *
++ * @author Tobias Koenig <tokoe@kdab.com>
++ * @see Akonadi::Attribute
++ */
++class BlockAlarmsAttribute : public Akonadi::Attribute
++{
++  public:
++    /**
++     * Creates a new block alarms attribute.
++     */
++    BlockAlarmsAttribute();
++
++    /**
++     * Destroys the block alarms attribute.
++     */
++    ~BlockAlarmsAttribute();
++
++    /**
++     * Reimplemented from Attribute
++     */
++    QByteArray type() const;
++
++    /**
++     * Reimplemented from Attribute
++     */
++    BlockAlarmsAttribute* clone() const;
++
++    /**
++     * Reimplemented from Attribute
++     */
++    QByteArray serialized() const;
++
++    /**
++     * Reimplemented from Attribute
++     */
++    void deserialize( const QByteArray &data );
++};
++
++}
++
++#endif
+diff --git a/plasma/generic/dataengines/calendar/akonadi/calendar.cpp b/plasma/generic/dataengines/calendar/akonadi/calendar.cpp
+new file mode 100644
+index 0000000..8ff81ef
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/calendar.cpp
+@@ -0,0 +1,2125 @@
++/*
++  Copyright (c) 2009 KDAB
++  Author: Sebastian Sauer <sebsauer@kdab.net>
++          Frank Osterfeld <frank@kdab.net>
++
++  This program is free software; you can redistribute it and/or modify
++  it under the terms of the GNU General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or
++  (at your option) any later version.
++
++  This program is distributed in the hope that it will be useful,
++  but WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++  GNU General Public License for more details.
++
++  You should have received a copy of the GNU General Public License along
++  with this program; if not, write to the Free Software Foundation, Inc.,
++  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++*/
++
++#include "calendar.h"
++#include "calendar_p.h"
++
++#include "collectionselection.h"
++#include "blockalarmsattribute.h"
++#include "utils.h"
++
++#include <KLocale>
++#include <KSelectionProxyModel>
++#include <Akonadi/EntityMimeTypeFilterModel>
++#include <QtCore/QMultiHash>
++#include <QItemSelection>
++
++using namespace CalendarSupport;
++
++Calendar::Private::Private( QAbstractItemModel *treeModel, QAbstractItemModel *model, Calendar *qq )
++  : q( qq ),
++    mTimeZones( new KCalCore::ICalTimeZones ),
++    mNewObserver( false ),
++    mObserversEnabled( true ),
++    mDefaultFilter( new KCalCore::CalFilter ),
++    m_treeModel( treeModel ),
++    m_model( model )
++{
++  // Setup default filter, which does nothing
++  mDefaultFilter->setEnabled( false );
++  m_filterProxy = new CalFilterProxyModel( q );
++  m_filterProxy->setFilter( mDefaultFilter );
++  m_filterProxy->setSourceModel( model );
++  m_filterProxy->setObjectName( "Implements KCalCore filtering functionality" );
++
++  // user information...
++  mOwner.setName( i18n( "Unknown Name" ) );
++  mOwner.setEmail( i18n( "unknown@nowhere" ) );
++
++  connect( m_model, SIGNAL(dataChanged(QModelIndex,QModelIndex)),
++           this, SLOT(dataChanged(QModelIndex,QModelIndex)) );
++
++  connect( m_model, SIGNAL(layoutChanged()),
++           this, SLOT(layoutChanged()) );
++
++  connect( m_model, SIGNAL(modelReset()),
++           this, SLOT(modelReset()) );
++
++  connect( m_model, SIGNAL(rowsInserted(QModelIndex,int,int)),
++           this, SLOT(rowsInserted(QModelIndex,int,int)) );
++
++  connect( m_model, SIGNAL(rowsAboutToBeRemoved(QModelIndex,int,int)),
++           this, SLOT(rowsAboutToBeRemoved(QModelIndex,int,int)) );
++
++  // use the unfiltered model to catch collections
++  connect( m_treeModel, SIGNAL(rowsInserted(QModelIndex,int,int)),
++           this, SLOT(rowsInsertedInTreeModel(QModelIndex,int,int)) );
++
++  connect( m_treeModel, SIGNAL(rowsAboutToBeRemoved(QModelIndex,int,int)),
++           this, SLOT(rowsAboutToBeRemovedInTreeModel(QModelIndex,int,int)) );
++
++  connect( m_treeModel, SIGNAL(dataChanged(QModelIndex,QModelIndex)),
++           this, SLOT(dataChangedInTreeModel(QModelIndex,QModelIndex)) );
++
++  connect( m_treeModel, SIGNAL(rowsMoved(QModelIndex,int,int,QModelIndex,int)),
++           SLOT(onRowsMovedInTreeModel(QModelIndex,int,int,QModelIndex,int)) );
++
++  /*
++  connect( m_monitor, SIGNAL(itemLinked(Akonadi::Item,Akonadi::Collection)),
++           this, SLOT(itemAdded(Akonadi::Item,Akonadi::Collection)) );
++  connect( m_monitor, SIGNAL(itemUnlinked(Akonadi::Item,Akonadi::Collection)),
++           this, SLOT(itemRemoved(Akonadi::Item,Akonadi::Collection)) );
++  */
++}
++
++void Calendar::Private::rowsInsertedInTreeModel( const QModelIndex &parent, int start, int end )
++{
++  collectionsAdded( collectionsFromModel( m_treeModel, parent, start, end ) );
++}
++
++void Calendar::Private::rowsAboutToBeRemovedInTreeModel( const QModelIndex &parent,
++                                                         int start, int end )
++{
++  collectionsRemoved( collectionsFromModel( m_treeModel, parent, start, end ) );
++}
++
++void Calendar::Private::dataChangedInTreeModel( const QModelIndex &topLeft,
++                                                const QModelIndex &bottomRight )
++{
++  Q_ASSERT( topLeft.row() <= bottomRight.row() );
++  const int endRow = bottomRight.row();
++  QModelIndex i( topLeft );
++  int row = i.row();
++  while ( row <= endRow ) {
++    const Akonadi::Collection col = collectionFromIndex( i );
++    if ( col.isValid() ) {
++      // Attributes might have changed, store the new collection and discard the old one
++      m_collectionMap.insert( col.id(), col );
++    }
++    ++row;
++    i = i.sibling( row, topLeft.column() );
++  }
++}
++
++void Calendar::Private::rowsInserted( const QModelIndex &parent, int start, int end )
++{
++  itemsAdded( itemsFromModel( m_model, parent, start, end ) );
++}
++
++void Calendar::Private::rowsAboutToBeRemoved( const QModelIndex &parent, int start, int end )
++{
++  itemsRemoved( itemsFromModel( m_model, parent, start, end ) );
++}
++
++void Calendar::Private::layoutChanged()
++{
++
++}
++
++void Calendar::Private::onRowsMovedInTreeModel( const QModelIndex &sourceParent, int sourceStart, int sourceEnd,
++                                                const QModelIndex &destinationParent, int destinationRow )
++{
++  Q_ASSERT( sourceEnd >= sourceStart );
++  Q_ASSERT( sourceStart >= 0 );
++  Q_ASSERT( destinationRow >= 0 );
++
++  const Akonadi::Collection sourceCollection = collectionFromIndex( sourceParent );
++  const Akonadi::Collection destinationCollection = collectionFromIndex( destinationParent );
++
++  if ( sourceCollection.isValid() && destinationCollection.isValid() &&
++       sourceCollection.id() != destinationCollection.id() ) {
++    const int numItems = sourceEnd - sourceStart + 1;
++    Akonadi::Item::List movedItems = itemsFromModel( m_treeModel, destinationParent, destinationRow,
++                                                     destinationRow + numItems - 1 );
++
++    { // Start hack
++      // KSelectionProxyModel doesn't honour rowsMoved() yet, so, if the source model emitted rowsMoved
++      // (items changing collection) we could only catch it in the onLayoutChanged() slot, which isn't
++      // performant. So we listen to the source model's rowsMoved() and check manuall if it when in or
++      // out of the selection, and notify the application.
++      Akonadi::EntityMimeTypeFilterModel *m = qobject_cast<Akonadi::EntityMimeTypeFilterModel*>( m_model );
++      if ( m ) {
++        KSelectionProxyModel *sm = qobject_cast<KSelectionProxyModel*>( m->sourceModel() );
++        if ( sm ) {
++          CollectionSelection collectionSelection( sm->selectionModel() );
++          const bool sourceCollectionIsSelected = collectionSelection.contains( sourceCollection.id() );
++          const bool destinationCollectionIsSelected = collectionSelection.contains( destinationCollection.id() );
++          if ( sourceCollectionIsSelected && destinationCollectionIsSelected ) {
++            foreach( const Akonadi::Item item, movedItems ) {
++              if ( item.isValid() && item.hasPayload<KCalCore::Incidence::Ptr>() ) {
++                // We have old items ( that think they belong to another collection ) inside m_itemMap
++                if ( m_itemMap.contains( item.id() ) ) {
++                  itemsRemoved( movedItems );
++                  itemsAdded( movedItems );
++                }
++              }
++            }
++          } else if ( !sourceCollectionIsSelected && destinationCollectionIsSelected ) { // Added
++            itemsAdded( movedItems );
++          } else if ( sourceCollectionIsSelected && !destinationCollectionIsSelected ) { // Removed
++            itemsRemoved( movedItems );
++          }
++        }
++      }
++    } // end hack
++  }
++}
++
++void Calendar::Private::appendVirtualItems( Akonadi::Item::List &itemList )
++{
++  foreach( const Akonadi::Item &item, itemList ) {
++    if ( m_virtualItems.contains( item.id() ) ) {
++      itemList.append( m_virtualItems.value( item.id() ) );
++    }
++  }
++}
++
++void Calendar::Private::modelReset()
++{
++  clear();
++  readFromModel();
++}
++
++void Calendar::Private::clear()
++{
++  itemsRemoved( m_itemMap.values() );
++  Q_ASSERT( m_itemMap.isEmpty() );
++  m_childToParent.clear();
++  m_parentToChildren.clear();
++  m_childToUnseenParent.clear();
++  m_unseenParentToChildren.clear();
++  m_itemIdsForDate.clear();
++  m_itemDateForItemId.clear();
++  m_virtualItems.clear();
++}
++
++void Calendar::Private::readFromModel()
++{
++  itemsAdded( itemsFromModel( m_model ) );
++}
++
++void Calendar::Private::dataChanged( const QModelIndex &topLeft, const QModelIndex &bottomRight )
++{
++  // kDebug();
++  Q_ASSERT( topLeft.row() <= bottomRight.row() );
++  const int endRow = bottomRight.row();
++  QModelIndex i( topLeft );
++  int row = i.row();
++  while ( row <= endRow ) {
++    const Akonadi::Item item = itemFromIndex( i );
++    if ( item.isValid() ) {
++      updateItem( item, AssertExists );
++    }
++    ++row;
++    i = i.sibling( row, topLeft.column() );
++  }
++  emit q->calendarChanged();
++}
++
++Calendar::Private::~Private()
++{
++  Q_FOREACH ( const Akonadi::Item &item, m_itemMap ) {
++    CalendarSupport::incidence( item )->unRegisterObserver( q );
++  }
++
++  delete mTimeZones;
++  delete mDefaultFilter;
++}
++
++void Calendar::Private::assertInvariants() const
++{
++}
++
++void Calendar::Private::updateItem( const Akonadi::Item &item, UpdateMode mode )
++{
++  assertInvariants();
++  const bool alreadyExisted = m_itemMap.contains( item.id() );
++  const Akonadi::Item::Id id = item.id();
++
++  const KCalCore::Incidence::Ptr incidence = CalendarSupport::incidence( item );
++
++  if ( !incidence ) {
++    return;
++  }
++
++  /*
++  kDebug() << "id=" << item.id()
++           << "version=" << item.revision()
++           << "alreadyExisted=" << alreadyExisted
++           << "; mode = " << mode
++           << "; uid = " << incidence->uid()
++           << "; storageCollection.id() = " << item.storageCollectionId() // the real collection
++           << "; parentCollection.id() = " << item.parentCollection().id(); // can be a virtual collection
++    */
++  if ( mode != AssertExists && alreadyExisted ) {
++    // An item from a virtual folder was inserted and we already have an item with
++    // this id, belonging to the real collection. So we just insert it in m_virtualItems
++    // so we keep track of it. Most hashes are indexed by Item::Id, and korg does lookups by Id too,
++    // so we can't just treat this item as an independent one.
++    if ( m_itemMap[id].parentCollection().id() != item.parentCollection().id() ) {
++      m_virtualItems[item.id()].append( item );
++      q->notifyIncidenceAdded( item );
++    } else {
++      kError() << "Item " << item.id() << " is already known.";
++    }
++    return;
++  }
++
++  //Q_ASSERT( mode == DontCare || alreadyExisted == ( mode == AssertExists ) );
++
++  if ( alreadyExisted ) {
++    if ( !m_itemMap.contains( id ) ) {
++      // Item was deleted almost at the same time the change was made
++      // ignore this change
++      return;
++    }
++
++    if ( item.storageCollectionId() == -1 ) {
++      // A valid item can have an invalid storage id if it was deleted while
++      // fetching the ancestor
++      return;
++    }
++
++    if ( item.storageCollectionId() != m_itemMap.value( id ).storageCollectionId() ) {
++      // An item moved happened, update our internal copy, the storateCollectionId has changed.
++      Akonadi::Collection::Id oldCollectionId = m_itemMap.value( id ).storageCollectionId();
++      m_itemMap.insert( id, item );
++      if ( item.isValid() ) {
++        UnseenItem oldUi;
++        UnseenItem newUi;
++        oldUi.collection = oldCollectionId;
++        oldUi.uid = incidence->uid();
++        if ( m_uidToItemId.contains( oldUi ) ) {
++          newUi.collection = item.storageCollectionId();
++          newUi.uid = oldUi.uid;
++          m_uidToItemId.remove( oldUi );
++          m_uidToItemId.insert( newUi, item.id() );
++        } else {
++          Q_ASSERT_X( false, "Calendar::Private::updateItem", "Item wasn't found in m_uidToItemId" );
++          return;
++        }
++      }
++    }
++    // update-only goes here
++  } else {
++    // new-only goes here
++    const Akonadi::Collection::Rights rights = item.parentCollection().rights();
++    if ( !( rights & Akonadi::Collection::CanDeleteItem ) &&
++         !( rights & Akonadi::Collection::CanChangeItem ) &&
++         !incidence->isReadOnly() ) {
++      incidence->setReadOnly( true );
++    }
++  }
++
++  if ( alreadyExisted && m_itemDateForItemId.contains( item.id() ) ) {
++    // for changed items, we must remove existing date entries (they might have changed)
++    m_itemIdsForDate.remove( m_itemDateForItemId[item.id()], item.id() );
++    m_itemDateForItemId.remove( item.id() );
++  }
++
++  QString date;
++  if ( const KCalCore::Todo::Ptr t = CalendarSupport::todo( item ) ) {
++    if ( t->hasDueDate() ) {
++      date = t->dtDue().date().toString();
++    }
++  } else if ( const KCalCore::Event::Ptr e = CalendarSupport::event( item ) ) {
++    if ( !e->recurs() && !e->isMultiDay() ) {
++      date = e->dtStart().date().toString();
++    }
++  } else if ( const KCalCore::Journal::Ptr j = CalendarSupport::journal( item ) ) {
++    date = j->dtStart().date().toString();
++  } else {
++    kError() << "Item id is " << item.id()
++             << item.hasPayload<KCalCore::Incidence::Ptr>()
++             << item.hasPayload<KCalCore::Event::Ptr>()
++             << item.hasPayload<KCalCore::Todo::Ptr>()
++             << item.hasPayload<KCalCore::Journal::Ptr>();
++    KCalCore::Incidence::Ptr p = CalendarSupport::incidence( item );
++    if ( p ) {
++      kError() << "incidence uid is " << p->uid()
++               << " and type is " << p->typeStr();
++    }
++
++    Q_ASSERT( false );
++    return;
++  }
++
++  if ( !m_itemIdsForDate.contains( date, item.id() ) && !date.isEmpty() ) {
++    m_itemIdsForDate.insert( date, item.id() );
++    m_itemDateForItemId.insert( item.id(), date );
++  }
++
++  m_itemMap.insert( id, item );
++
++  UnseenItem ui;
++  ui.collection = item.storageCollectionId();
++  ui.uid = incidence->uid();
++
++  //REVIEW(AKONADI_PORT)
++  //UIDs might be duplicated and thus not unique, so for now we assume that the relatedTo
++  // UID refers to an item in the same collection.
++  //this might break with virtual collections, so we might fall back to a global UID
++  //to akonadi item mapping, and pick just any item (or the first found, or whatever
++  //strategy makes sense) from the ones with the same UID
++  const QString parentUID = incidence->relatedTo();
++  const bool hasParent = !parentUID.isEmpty();
++  UnseenItem parentItem;
++  QMap<UnseenItem,Akonadi::Item::Id>::const_iterator parentIt = m_uidToItemId.constEnd();
++  bool knowParent = false;
++  bool parentNotChanged = false;
++  if ( hasParent ) {
++    parentItem.collection = item.storageCollectionId();
++    parentItem.uid = parentUID;
++    parentIt = m_uidToItemId.constFind( parentItem );
++    knowParent = parentIt != m_uidToItemId.constEnd();
++  }
++
++  if ( alreadyExisted ) { // We're updating an existing item
++    const bool existedInUidMap = m_uidToItemId.contains( ui );
++    if ( m_uidToItemId.value( ui ) != item.id() ) {
++      kError()<< "Ignoring item. item.id() = " << item.id() << "; cached id = " << m_uidToItemId.value( ui )
++              << "; item uid = "  << ui.uid
++              << "; calendar = " << q->objectName()
++              << "; existed in cache = " << existedInUidMap
++              << "; storageCollection.id() = " << item.storageCollectionId() // the real collection
++              << "; parentCollection.id() = " << item.parentCollection().id() // can be a virtual collection
++              << "; hasParent = " << hasParent
++              << "; knowParent = " << knowParent;
++      if ( existedInUidMap ) {
++        Q_ASSERT_X( false, "updateItem", "uidToId map disagrees with item id" );
++      } else {
++        kDebug() << "m_uidToItemId has size " << m_uidToItemId.count();
++        QMapIterator<UnseenItem, Akonadi::Item::Id> i( m_uidToItemId );
++        while ( i.hasNext() ) {
++          i.next();
++          if ( i.key().uid == ui.uid || i.value() == item.id() ) {
++            kDebug() << " key " << i.key().uid << i.key().collection << " has value " << i.value();
++          }
++        }
++        kError() << "Possible cause is that the resource isn't explicitly setting an uid ( and a random one is generated )";
++        Q_ASSERT_X( false, "updateItem", "Item not found inside m_uidToItemId" );
++      }
++      return;
++    }
++
++    QHash<Akonadi::Item::Id,Akonadi::Item::Id>::Iterator oldParentIt = m_childToParent.find( id );
++    if ( oldParentIt != m_childToParent.end() ) {
++      const KCalCore::Incidence::Ptr parentInc =
++        CalendarSupport::incidence( m_itemMap.value( oldParentIt.value() ) );
++      Q_ASSERT( parentInc );
++      if ( parentInc->uid() != parentUID ) {
++        //parent changed, remove old entries
++        QList<Akonadi::Item::Id>& l = m_parentToChildren[oldParentIt.value()];
++        l.removeAll( id );
++        m_childToParent.remove( id );
++      } else {
++        parentNotChanged = true;
++      }
++    } else { //old parent not seen, maybe unseen?
++      QHash<Akonadi::Item::Id,UnseenItem>::Iterator oldUnseenParentIt =
++        m_childToUnseenParent.find( id );
++      if ( oldUnseenParentIt != m_childToUnseenParent.end() ) {
++        if ( oldUnseenParentIt.value().uid != parentUID ) {
++          //parent changed, remove old entries
++          QList<Akonadi::Item::Id>& l = m_unseenParentToChildren[oldUnseenParentIt.value()];
++          l.removeAll( id );
++          m_childToUnseenParent.remove( id );
++        } else {
++          parentNotChanged = true;
++        }
++      }
++    }
++  } else { // We're inserting a new item
++    m_uidToItemId.insert( ui, item.id() );
++
++    //check for already known children:
++    const QList<Akonadi::Item::Id> orphanedChildren = m_unseenParentToChildren.value( ui );
++    if ( !orphanedChildren.isEmpty() ) {
++      m_parentToChildren.insert( id, orphanedChildren );
++    }
++
++    Q_FOREACH ( const Akonadi::Item::Id &cid, orphanedChildren ) {
++      m_childToParent.insert( cid, id );
++    }
++
++    m_unseenParentToChildren.remove( ui );
++    m_childToUnseenParent.remove( id );
++  }
++
++  if ( hasParent && !parentNotChanged ) {
++    if ( knowParent ) {
++      Q_ASSERT( !m_parentToChildren.value( parentIt.value() ).contains( id ) );
++      const KCalCore::Incidence::Ptr parentInc =
++        CalendarSupport::incidence( m_itemMap.value( parentIt.value() ) );
++      Q_ASSERT( parentInc );
++      m_parentToChildren[parentIt.value()].append( id );
++      m_childToParent.insert( id, parentIt.value() );
++    } else {
++      m_childToUnseenParent.insert( id, parentItem );
++      m_unseenParentToChildren[parentItem].append( id );
++    }
++  }
++
++  if ( !alreadyExisted ) {
++    incidence->registerObserver( q );
++    q->notifyIncidenceAdded( item );
++  } else {
++    q->notifyIncidenceChanged( item );
++  }
++  assertInvariants();
++}
++
++void Calendar::Private::itemChanged( const Akonadi::Item &item )
++{
++  assertInvariants();
++  Q_ASSERT( item.isValid() );
++  const KCalCore::Incidence::Ptr incidence = CalendarSupport::incidence( item );
++  if ( !incidence ) {
++    kWarning() << "Really? No incidence for item.id() " << item.id();
++    return;
++  }
++  updateItem( item, AssertExists );
++  emit q->calendarChanged();
++  assertInvariants();
++}
++
++void Calendar::Private::itemsAdded( const Akonadi::Item::List &items )
++{
++  assertInvariants();
++  foreach ( const Akonadi::Item &item, items ) {
++    Q_ASSERT( item.isValid() );
++    if ( !hasIncidence( item ) ) {
++      continue;
++    }
++    updateItem( item, AssertNew );
++    const KCalCore::Incidence::Ptr incidence = item.payload<KCalCore::Incidence::Ptr>();
++  }
++  emit q->calendarChanged();
++  assertInvariants();
++}
++
++void Calendar::Private::collectionsAdded( const Akonadi::Collection::List &collections )
++{
++  foreach ( const Akonadi::Collection &collection, collections ) {
++    m_collectionMap[collection.id()] = collection;
++  }
++}
++
++void Calendar::Private::collectionsRemoved( const Akonadi::Collection::List &collections )
++{
++  // kDebug() << "removing collections: " << collections.count();
++  foreach ( const Akonadi::Collection &collection, collections ) {
++    m_collectionMap.remove( collection.id() );
++  }
++}
++
++void Calendar::Private::removeItemFromMaps( const Akonadi::Item &item )
++{
++  UnseenItem unseen_item;
++  UnseenItem unseen_parent;
++
++  unseen_item.collection = unseen_parent.collection = item.storageCollectionId();
++
++  KCalCore::Incidence::Ptr incidence = CalendarSupport::incidence( item );
++  if ( incidence ) {
++    unseen_item.uid  = incidence->uid();
++    unseen_parent.uid = incidence->relatedTo();
++  }
++
++  if ( m_childToParent.contains( item.id() ) ) {
++    Akonadi::Item::Id parentId = m_childToParent.take( item.id() );
++    m_parentToChildren[parentId].removeAll( item.id() );
++  }
++
++  foreach ( const Akonadi::Item::Id &id, m_parentToChildren[item.id()] ) {
++    m_childToUnseenParent[id] = unseen_item;
++    m_unseenParentToChildren[unseen_item].push_back( id );
++  }
++
++  m_parentToChildren.remove( item.id() );
++
++  m_childToUnseenParent.remove( item.id() );
++
++  m_unseenParentToChildren[unseen_parent].removeAll( item.id() );
++
++  m_uidToItemId.remove( unseen_item );
++  m_itemDateForItemId.remove( item.id() );
++
++  const QList<QString> entriesToDelete = m_itemIdsForDate.keys( item.id() );
++  foreach( const QString &entryToDelete, entriesToDelete ) {
++    m_itemIdsForDate.remove( entryToDelete );
++  }
++}
++
++void Calendar::Private::itemsRemoved( const Akonadi::Item::List &items )
++{
++  assertInvariants();
++  foreach ( const Akonadi::Item &item, items ) {
++    Q_ASSERT( item.isValid() );
++
++    if ( !m_virtualItems.value( item.id() ).isEmpty() ) {
++      // We have more than one item with the same id, due to virtual folders, so we can't
++      // cleanup any hashes, to-do hierarchies, id to uid maps, etc, yet. We can only do that
++      // when the last item is removed. Just decrement and return.
++      m_virtualItems[item.id()].removeLast();
++      q->notifyIncidenceDeleted( item );
++      emit q->calendarChanged();
++      return;
++    }
++
++    if ( !m_itemMap.contains( item.id() ) ) {
++      /** There's an off by one error in the ETM which steveire doesn't have time right now to look at.
++       *  When removing an item in korganizer, the plasma's calendar ETM emits rowsAboutToBeRemoved()
++       *  for the wrong item, which makes plasma crash.
++       *
++       * I won't remove this hack in the future because this code is to be deleted and replaced by
++       * kdepimlibs/akonadi/calendar/etmcalendar.cpp ( branch calendaring ), which i'm currently writting
++       * unit tests. So until then no need to crash with an empty payload exception.
++       */
++      return;
++    }
++
++    Akonadi::Item oldItem( m_itemMap.take( item.id() ) );
++
++    removeItemFromMaps( oldItem );
++
++    Q_ASSERT( oldItem.hasPayload<KCalCore::Incidence::Ptr>() );
++    const KCalCore::Incidence::Ptr incidence = oldItem.payload<KCalCore::Incidence::Ptr>();
++    /*
++    kDebug() << "Remove uid=" << incidence->uid()
++             << "summary=" << incidence->summary()
++             << "type=" << int( incidence->type() )
++             << "; id= " << item.id() << "; revision=" << item.revision()
++             << " calendar = "
++             << q;
++    */
++
++    if ( const KCalCore::Event::Ptr e = incidence.dynamicCast<KCalCore::Event>() ) {
++      if ( !e->recurs() ) {
++        m_itemIdsForDate.remove( e->dtStart().date().toString(), item.id() );
++      }
++    } else if ( const KCalCore::Todo::Ptr t = incidence.dynamicCast<KCalCore::Todo>( ) ) {
++      if ( t->hasDueDate() ) {
++        m_itemIdsForDate.remove( t->dtDue().date().toString(), item.id() );
++      }
++    } else if ( const KCalCore::Journal::Ptr j = incidence.dynamicCast<KCalCore::Journal>() ) {
++      m_itemIdsForDate.remove( j->dtStart().date().toString(), item.id() );
++    } else {
++      kError() << "Unsupported incidence type: " << incidence;
++      Q_ASSERT( false );
++      continue;
++    }
++
++    // oldItem will almost always be the same as item, but, when you move an item from one collection
++    // and the destination collection isn't selected, itemsRemoved() is called, and they will differ
++    // on the parentCollection id.
++    q->notifyIncidenceDeleted( oldItem );
++    incidence->unRegisterObserver( q );
++  }
++  emit q->calendarChanged();
++  assertInvariants();
++}
++
++Calendar::Calendar( QAbstractItemModel *treeModel, QAbstractItemModel *model,
++                    const KDateTime::Spec &timeSpec, QObject *parent )
++  : QObject( parent ), d( new Private( treeModel, model, this ) )
++{
++  d->mTimeSpec = timeSpec;
++  d->mViewTimeSpec = timeSpec;
++  d->readFromModel();
++}
++
++Calendar::~Calendar()
++{
++  delete d;
++}
++
++QAbstractItemModel *Calendar::treeModel() const
++{
++  return d->m_treeModel;
++}
++
++QAbstractItemModel *Calendar::model() const
++{
++  return d->m_filterProxy;
++}
++
++QAbstractItemModel *Calendar::unfilteredModel() const
++{
++  return d->m_model;
++}
++
++void Calendar::setUnfilteredModel( QAbstractItemModel *model )
++{
++
++  if ( d->m_model == model ) {
++    return;
++  }
++
++  if ( d->m_model ) {
++    disconnect( d->m_model, SIGNAL(dataChanged(QModelIndex,QModelIndex)),
++                d, SLOT(dataChanged(QModelIndex,QModelIndex)) );
++
++    disconnect( d->m_model, SIGNAL(layoutChanged()),
++                d, SLOT(layoutChanged()) );
++
++    disconnect( d->m_model, SIGNAL(modelReset()),
++                d, SLOT(modelReset()) );
++
++    disconnect( d->m_model, SIGNAL(rowsInserted(QModelIndex,int,int)),
++                d, SLOT(rowsInserted(QModelIndex,int,int)) );
++
++    disconnect( d->m_model, SIGNAL(rowsAboutToBeRemoved(QModelIndex,int,int)),
++                d, SLOT(rowsAboutToBeRemoved(QModelIndex,int,int)) );
++  }
++  d->m_model = model;
++  d->m_filterProxy->setSourceModel( model );
++  if ( model ) {
++    connect( d->m_model, SIGNAL(dataChanged(QModelIndex,QModelIndex)),
++             d, SLOT(dataChanged(QModelIndex,QModelIndex)) );
++
++    connect( d->m_model, SIGNAL(layoutChanged()),
++             d, SLOT(layoutChanged()) );
++
++    connect( d->m_model, SIGNAL(modelReset()),
++             d, SLOT(modelReset()) );
++
++    connect( d->m_model, SIGNAL(rowsInserted(QModelIndex,int,int)),
++             d, SLOT(rowsInserted(QModelIndex,int,int)) );
++
++    connect( d->m_model, SIGNAL(rowsAboutToBeRemoved(QModelIndex,int,int)),
++             d, SLOT(rowsAboutToBeRemoved(QModelIndex,int,int)) );
++    d->modelReset();
++  }
++}
++
++// This method will be called probably multiple times if a series of changes where done.
++// One finished the endChange() method got called.
++
++void Calendar::incidenceUpdate( const QString &uid, const KDateTime &recurrenceId )
++{
++  Q_UNUSED( uid );
++  Q_UNUSED( recurrenceId );
++}
++
++void Calendar::incidenceUpdated( const QString &uid, const KDateTime &recurrenceId )
++{
++  Q_UNUSED( recurrenceId );
++  KCalCore::Incidence::Ptr incidence = CalendarSupport::incidence( itemForIncidenceUid( uid ) );
++
++  if ( !incidence ) {
++    return;
++  }
++
++  incidence->setLastModified( KDateTime::currentUtcDateTime() );
++  // we should probably update the revision number here,
++  // or internally in the Event itself when certain things change.
++  // need to verify with ical documentation.
++
++  // The static_cast is ok as the CalendarLocal only observes Incidence objects
++#ifdef AKONADI_PORT_DISABLED
++  notifyIncidenceChanged( static_cast<KCalCore::Incidence::Ptr >( incidence ) );
++#else
++  kDebug() << "AKONADI PORT: Disabled code in  " << Q_FUNC_INFO;
++#endif
++}
++
++Akonadi::Item Calendar::event( Akonadi::Item::Id id ) const
++{
++  const Akonadi::Item item = d->m_itemMap.value( id );
++  if ( CalendarSupport::event( item ) ) {
++    return item;
++  } else {
++    return Akonadi::Item();
++  }
++}
++
++Akonadi::Item Calendar::todo( Akonadi::Item::Id id ) const
++{
++  const Akonadi::Item item = d->m_itemMap.value( id );
++  if ( CalendarSupport::todo( item ) ) {
++    return item;
++  } else {
++    return Akonadi::Item();
++  }
++}
++
++Akonadi::Item::List Calendar::rawTodos( TodoSortField sortField,
++                                        SortDirection sortDirection )
++{
++  Akonadi::Item::List todoList;
++  QHashIterator<Akonadi::Item::Id, Akonadi::Item> i( d->m_itemMap );
++  while ( i.hasNext() ) {
++    i.next();
++    if ( CalendarSupport::todo( i.value() ) ) {
++      todoList.append( i.value() );
++    }
++  }
++  d->appendVirtualItems( todoList );
++  return sortTodos( todoList, sortField, sortDirection );
++}
++
++Akonadi::Item::List Calendar::rawTodosForDate( const QDate &date )
++{
++  Akonadi::Item::List todoList;
++  QString dateStr = date.toString();
++  QMultiHash<QString, Akonadi::Item::Id>::const_iterator it =
++    d->m_itemIdsForDate.constFind( dateStr );
++  while ( it != d->m_itemIdsForDate.constEnd() && it.key() == dateStr ) {
++    if ( CalendarSupport::todo( d->m_itemMap[it.value()] ) ) {
++      todoList.append( d->m_itemMap[it.value()] );
++    }
++    ++it;
++  }
++  d->appendVirtualItems( todoList );
++  return todoList;
++}
++
++KCalCore::Alarm::List Calendar::alarmsTo( const KDateTime &to )
++{
++  return alarms( KDateTime( QDate( 1900, 1, 1 ) ), to );
++}
++
++KCalCore::Alarm::List Calendar::alarms( const KDateTime &from, const KDateTime &to, bool excludeBlockedAlarms )
++{
++  KCalCore::Alarm::List alarmList;
++  QHashIterator<Akonadi::Item::Id, Akonadi::Item> i( d->m_itemMap );
++  while ( i.hasNext() ) {
++    const Akonadi::Item item = i.next().value();
++
++    if ( excludeBlockedAlarms ) {
++      // take the collection from m_collectionMap, because we need the up-to-date collection attributes
++      const Akonadi::Collection parentCollection = d->m_collectionMap.value( item.storageCollectionId() );
++      if ( parentCollection.isValid() ) {
++        if ( parentCollection.hasAttribute<BlockAlarmsAttribute>() )
++          continue; // do not include alarms from this collection
++      }
++    }
++
++    KCalCore::Incidence::Ptr incidence = CalendarSupport::incidence( item );
++    if ( !incidence ) {
++      continue;
++    }
++
++    if ( incidence->recurs() ) {
++      appendRecurringAlarms( alarmList, item, from, to );
++    } else {
++      appendAlarms( alarmList, item, from, to );
++    }
++  }
++  return alarmList;
++}
++
++Akonadi::Item::List Calendar::rawEventsForDate( const QDate &date,
++                                                const KDateTime::Spec &timespec,
++                                                EventSortField sortField,
++                                                SortDirection sortDirection )
++{
++  Akonadi::Item::List eventList;
++  // Find the hash for the specified date
++  const QString dateStr = date.toString();
++  // Iterate over all non-recurring, single-day events that start on this date
++  QMultiHash<QString, Akonadi::Item::Id>::const_iterator it =
++    d->m_itemIdsForDate.constFind( dateStr );
++  KDateTime::Spec ts = timespec.isValid() ? timespec : timeSpec();
++  KDateTime kdt( date, ts );
++  while ( it != d->m_itemIdsForDate.constEnd() && it.key() == dateStr ) {
++    if ( KCalCore::Event::Ptr ev = CalendarSupport::event( d->m_itemMap[it.value()] ) ) {
++      KDateTime end( ev->dtEnd().toTimeSpec( ev->dtStart() ) );
++      if ( ev->allDay() ) {
++        end.setDateOnly( true );
++      } else {
++        end = end.addSecs( -1 );
++      }
++      if ( end >= kdt ) {
++        eventList.append( d->m_itemMap[it.value()] );
++      }
++    }
++    ++it;
++  }
++  // Iterate over all events. Look for recurring events that occur on this date
++  QHashIterator<Akonadi::Item::Id, Akonadi::Item> i( d->m_itemMap );
++  while ( i.hasNext() ) {
++    i.next();
++    if ( KCalCore::Event::Ptr ev = CalendarSupport::event( i.value() ) ) {
++      if ( ev->recurs() ) {
++        if ( ev->isMultiDay() ) {
++          int extraDays = ev->dtStart().date().daysTo( ev->dtEnd().date() );
++          for ( int j = 0; j <= extraDays; ++j ) {
++            if ( ev->recursOn( date.addDays( -j ), ts ) ) {
++              eventList.append( i.value() );
++              break;
++            }
++          }
++        } else {
++          if ( ev->recursOn( date, ts ) ) {
++            eventList.append( i.value() );
++          }
++        }
++      } else {
++        if ( ev->isMultiDay() ) {
++          if ( ev->dtStart().date() <= date && ev->dtEnd().date() >= date ) {
++            eventList.append( i.value() );
++          }
++        }
++      }
++    }
++  }
++
++  d->appendVirtualItems( eventList );
++
++  return sortEvents( eventList, sortField, sortDirection );
++}
++
++Akonadi::Item::List Calendar::rawEvents( const QDate &start, const QDate &end,
++                                         const KDateTime::Spec &timespec, bool inclusive )
++{
++  Akonadi::Item::List eventList;
++  KDateTime::Spec ts = timespec.isValid() ? timespec : timeSpec();
++  KDateTime st( start, ts );
++  KDateTime nd( end, ts );
++  KDateTime yesterStart = st.addDays( -1 );
++  // Get non-recurring events
++  QHashIterator<Akonadi::Item::Id, Akonadi::Item> i( d->m_itemMap );
++  while ( i.hasNext() ) {
++    i.next();
++    if ( KCalCore::Event::Ptr event = CalendarSupport::event( i.value() ) ) {
++      KDateTime rStart = event->dtStart();
++      if ( nd < rStart ) continue;
++      if ( inclusive && rStart < st ) {
++        continue;
++      }
++      if ( !event->recurs() ) { // non-recurring events
++        KDateTime rEnd = event->dtEnd();
++        if ( rEnd < st ) {
++          continue;
++        }
++        if ( inclusive && nd < rEnd ) {
++          continue;
++        }
++      } else { // recurring events
++        switch( event->recurrence()->duration() ) {
++        case -1: // infinite
++          if ( inclusive ) {
++            continue;
++          }
++          break;
++        case 0: // end date given
++        default: // count given
++          KDateTime rEnd( event->recurrence()->endDate(), ts );
++          if ( !rEnd.isValid() ) {
++            continue;
++          }
++          if ( rEnd < st ) {
++            continue;
++          }
++          if ( inclusive && nd < rEnd ) {
++            continue;
++          }
++          break;
++        } // switch(duration)
++      } //if (recurs)
++      eventList.append( i.value() );
++    }
++  }
++
++  d->appendVirtualItems( eventList );
++
++  return eventList;
++}
++
++Akonadi::Item::List Calendar::rawEventsForDate( const KDateTime &kdt )
++{
++  return rawEventsForDate( kdt.date(), kdt.timeSpec() );
++}
++
++Akonadi::Item::List Calendar::rawEvents( EventSortField sortField,
++                                         SortDirection sortDirection )
++{
++  Akonadi::Item::List eventList;
++  QHashIterator<Akonadi::Item::Id, Akonadi::Item> i( d->m_itemMap );
++  while ( i.hasNext() ) {
++    i.next();
++    if ( CalendarSupport::event( i.value() ) ) {
++      eventList.append( i.value() );
++    }
++  }
++  d->appendVirtualItems( eventList );
++  return sortEvents( eventList, sortField, sortDirection );
++}
++
++Akonadi::Item Calendar::journal( Akonadi::Item::Id id ) const
++{
++  const Akonadi::Item item = d->m_itemMap.value( id );
++  if ( CalendarSupport::journal( item ) ) {
++    return item;
++  } else {
++    return Akonadi::Item();
++  }
++}
++
++Akonadi::Item::List Calendar::rawJournals( JournalSortField sortField,
++                                           SortDirection sortDirection )
++{
++  Akonadi::Item::List journalList;
++  QHashIterator<Akonadi::Item::Id, Akonadi::Item> i( d->m_itemMap );
++  while ( i.hasNext() ) {
++    i.next();
++    if ( CalendarSupport::journal( i.value() ) ) {
++      journalList.append( i.value() );
++    }
++  }
++  d->appendVirtualItems( journalList );
++  return sortJournals( journalList, sortField, sortDirection );
++}
++
++Akonadi::Item::List Calendar::rawJournalsForDate( const QDate &date )
++{
++  Akonadi::Item::List journalList;
++  QString dateStr = date.toString();
++  QMultiHash<QString, Akonadi::Item::Id>::const_iterator it =
++    d->m_itemIdsForDate.constFind( dateStr );
++  while ( it != d->m_itemIdsForDate.constEnd() && it.key() == dateStr ) {
++    if ( CalendarSupport::journal( d->m_itemMap[it.value()] ) ) {
++      journalList.append( d->m_itemMap[it.value()] );
++    }
++    ++it;
++  }
++  d->appendVirtualItems( journalList );
++  return journalList;
++}
++
++Akonadi::Item Calendar::findParent( const Akonadi::Item &child ) const
++{
++  return d->m_itemMap.value( d->m_childToParent.value( child.id() ) );
++}
++
++Akonadi::Item::List Calendar::findChildren( const KCalCore::Incidence::Ptr &incidence ) const
++{
++  Akonadi::Item item = itemForIncidenceUid( incidence->uid() );
++
++  return findChildren( item );
++}
++
++Akonadi::Item::List Calendar::findChildren( const Akonadi::Item &parent ) const
++{
++  Akonadi::Item::List l;
++  Q_FOREACH( const Akonadi::Item::Id &id, d->m_parentToChildren.value( parent.id() ) ) {
++    l.push_back( d->m_itemMap.value( id ) );
++  }
++  return l;
++}
++
++bool Calendar::isChild( const Akonadi::Item &parent, const Akonadi::Item &child ) const
++{
++  return d->m_childToParent.value( child.id() ) == parent.id();
++}
++
++Akonadi::Item::Id Calendar::itemIdForIncidenceUid( const QString &uid ) const
++{
++  QHashIterator<Akonadi::Item::Id, Akonadi::Item> i( d->m_itemMap );
++  while ( i.hasNext() ) {
++    i.next();
++    const Akonadi::Item item = i.value();
++    Q_ASSERT( item.isValid() );
++    Q_ASSERT( item.hasPayload<KCalCore::Incidence::Ptr>() );
++    KCalCore::Incidence::Ptr inc = item.payload<KCalCore::Incidence::Ptr>();
++    if ( inc->uid() == uid ) {
++      return item.id();
++    }
++  }
++  kWarning() << "Failed to find Akonadi::Item for KCal uid " << uid;
++  return -1;
++}
++
++Akonadi::Item Calendar::itemForIncidenceUid( const QString &uid ) const
++{
++  return incidence( itemIdForIncidenceUid( uid ) );
++}
++
++// calendarbase.cpp
++
++KCalCore::Person Calendar::owner() const
++{
++  return d->mOwner;
++}
++
++void Calendar::setOwner( const KCalCore::Person &owner )
++{
++  d->mOwner = owner;
++}
++
++void Calendar::setTimeSpec( const KDateTime::Spec &timeSpec )
++{
++  d->mTimeSpec = timeSpec;
++  d->mBuiltInTimeZone = KCalCore::ICalTimeZone();
++  setViewTimeSpec( timeSpec );
++
++  doSetTimeSpec( d->mTimeSpec );
++}
++
++KDateTime::Spec Calendar::timeSpec() const
++{
++  return d->mTimeSpec;
++}
++
++void Calendar::setTimeZoneId( const QString &timeZoneId )
++{
++  d->mTimeSpec = d->timeZoneIdSpec( timeZoneId, false );
++  d->mViewTimeSpec = d->mTimeSpec;
++  d->mBuiltInViewTimeZone = d->mBuiltInTimeZone;
++
++  doSetTimeSpec( d->mTimeSpec );
++}
++
++//@cond PRIVATE
++KDateTime::Spec Calendar::Private::timeZoneIdSpec( const QString &timeZoneId,
++                                                   bool view )
++{
++  if ( view ) {
++    mBuiltInViewTimeZone = KCalCore::ICalTimeZone();
++  } else {
++    mBuiltInTimeZone = KCalCore::ICalTimeZone();
++  }
++  if ( timeZoneId == QLatin1String( "UTC" ) ) {
++    return KDateTime::UTC;
++  }
++  KCalCore::ICalTimeZone tz = mTimeZones->zone( timeZoneId );
++  if ( !tz.isValid() ) {
++    KCalCore::ICalTimeZoneSource tzsrc;
++#ifdef AKONADI_PORT_DISABLED
++    tz = tzsrc.parse( icaltimezone_get_builtin_timezone( timeZoneId.toLatin1() ) );
++#else
++    kDebug() << "AKONADI PORT: Disabled code in  " << Q_FUNC_INFO;
++#endif
++    if ( view ) {
++      mBuiltInViewTimeZone = tz;
++    } else {
++      mBuiltInTimeZone = tz;
++    }
++  }
++  if ( tz.isValid() ) {
++    return tz;
++  } else {
++    return KDateTime::ClockTime;
++  }
++}
++//@endcond
++
++QString Calendar::timeZoneId() const
++{
++  KTimeZone tz = d->mTimeSpec.timeZone();
++  return tz.isValid() ? tz.name() : QString();
++}
++
++void Calendar::setViewTimeSpec( const KDateTime::Spec &timeSpec ) const
++{
++  d->mViewTimeSpec = timeSpec;
++  d->mBuiltInViewTimeZone = KCalCore::ICalTimeZone();
++}
++
++void Calendar::setViewTimeZoneId( const QString &timeZoneId ) const
++{
++  d->mViewTimeSpec = d->timeZoneIdSpec( timeZoneId, true );
++}
++
++KDateTime::Spec Calendar::viewTimeSpec() const
++{
++  return d->mViewTimeSpec;
++}
++
++QString Calendar::viewTimeZoneId() const
++{
++  KTimeZone tz = d->mViewTimeSpec.timeZone();
++  return tz.isValid() ? tz.name() : QString();
++}
++
++void Calendar::shiftTimes( const KDateTime::Spec &oldSpec,
++                           const KDateTime::Spec &newSpec )
++{
++  setTimeSpec( newSpec );
++  int i, end;
++  Akonadi::Item::List ev = events();
++  for ( i = 0, end = ev.count();  i < end;  ++i ) {
++    CalendarSupport::event( ev[i] )->shiftTimes( oldSpec, newSpec );
++  }
++
++  Akonadi::Item::List to = todos();
++  for ( i = 0, end = to.count();  i < end;  ++i ) {
++    CalendarSupport::todo( to[i] )->shiftTimes( oldSpec, newSpec );
++  }
++
++  Akonadi::Item::List jo = journals();
++  for ( i = 0, end = jo.count();  i < end;  ++i ) {
++    CalendarSupport::journal( jo[i] )->shiftTimes( oldSpec, newSpec );
++  }
++}
++
++void Calendar::setFilter( KCalCore::CalFilter *filter )
++{
++  d->m_filterProxy->setFilter( filter ? filter : d->mDefaultFilter );
++}
++
++KCalCore::CalFilter *Calendar::filter()
++{
++  return d->m_filterProxy->filter();
++}
++
++QStringList Calendar::categories( Calendar *cal )
++{
++  Akonadi::Item::List rawInc( cal->rawIncidences() );
++  QStringList cats, thisCats;
++  // @TODO: For now just iterate over all incidences. In the future,
++  // the list of categories should be built when reading the file.
++  Q_FOREACH( const Akonadi::Item &i, rawInc ) {
++    thisCats = CalendarSupport::incidence( i )->categories();
++    for ( QStringList::ConstIterator si = thisCats.constBegin();
++          si != thisCats.constEnd(); ++si ) {
++      if ( !cats.contains( *si ) ) {
++        cats.append( *si );
++      }
++    }
++  }
++  return cats;
++}
++
++Akonadi::Item::List Calendar::incidences( const QDate &date )
++{
++  return mergeIncidenceList( events( date ), todos( date ), journals( date ) );
++}
++
++Akonadi::Item::List Calendar::incidences()
++{
++  if ( d->m_filterProxy->filter() == 0 || !d->m_filterProxy->filter()->isEnabled() ) {
++    // Lets skip the filterProxy and return m_itemMap, which is cheaper.
++    return rawIncidences();
++  } else {
++    return itemsFromModel( d->m_filterProxy );
++  }
++}
++
++Akonadi::Item::List Calendar::rawIncidences()
++{
++  // The following code is 100x faster than: return itemsFromModel( d->m_model )
++  QHashIterator<Akonadi::Item::Id, Akonadi::Item> i( d->m_itemMap );
++  Akonadi::Item::List list;
++  while ( i.hasNext() ) {
++    i.next();
++    list.append( i.value() );
++  }
++
++  return list;
++}
++
++Akonadi::Item::List Calendar::sortEvents( const Akonadi::Item::List &eventList_,
++                                          EventSortField sortField,
++                                          SortDirection sortDirection )
++{
++  Akonadi::Item::List eventList = eventList_;
++  Akonadi::Item::List eventListSorted;
++  Akonadi::Item::List tempList, t;
++  Akonadi::Item::List alphaList;
++  Akonadi::Item::List::Iterator sortIt;
++  Akonadi::Item::List::Iterator eit;
++
++  // Notice we alphabetically presort Summaries first.
++  // We do this so comparison "ties" stay in a nice order.
++
++  switch( sortField ) {
++  case EventSortUnsorted:
++    eventListSorted = eventList;
++    break;
++
++  case EventSortStartDate:
++    alphaList = sortEvents( eventList, EventSortSummary, sortDirection );
++    for ( eit = alphaList.begin(); eit != alphaList.end(); ++eit ) {
++      KCalCore::Event::Ptr e = CalendarSupport::event( *eit );
++      Q_ASSERT( e );
++      if ( e->dtStart().isDateOnly() ) {
++        tempList.append( *eit );
++        continue;
++      }
++      sortIt = eventListSorted.begin();
++      if ( sortDirection == SortDirectionAscending ) {
++        while ( sortIt != eventListSorted.end() &&
++                e->dtStart() >= CalendarSupport::event(*sortIt)->dtStart() ) {
++          ++sortIt;
++        }
++      } else {
++        while ( sortIt != eventListSorted.end() &&
++                e->dtStart() < CalendarSupport::event(*sortIt)->dtStart() ) {
++          ++sortIt;
++        }
++      }
++      eventListSorted.insert( sortIt, *eit );
++    }
++    if ( sortDirection == SortDirectionAscending ) {
++      // Prepend the list of Events without End DateTimes
++      tempList += eventListSorted;
++      eventListSorted = tempList;
++    } else {
++      // Append the list of Events without End DateTimes
++      eventListSorted += tempList;
++    }
++    break;
++
++  case EventSortEndDate:
++    alphaList = sortEvents( eventList, EventSortSummary, sortDirection );
++    for ( eit = alphaList.begin(); eit != alphaList.end(); ++eit ) {
++      KCalCore::Event::Ptr e = CalendarSupport::event( *eit );
++      Q_ASSERT( e );
++      if ( e->hasEndDate() ) {
++        sortIt = eventListSorted.begin();
++        if ( sortDirection == SortDirectionAscending ) {
++          while ( sortIt != eventListSorted.end() &&
++                  e->dtEnd() >= CalendarSupport::event(*sortIt)->dtEnd() ) {
++            ++sortIt;
++          }
++        } else {
++          while ( sortIt != eventListSorted.end() &&
++                  e->dtEnd() < CalendarSupport::event(*sortIt)->dtEnd() ) {
++            ++sortIt;
++          }
++        }
++      } else {
++        // Keep a list of the Events without End DateTimes
++        tempList.append( *eit );
++      }
++      eventListSorted.insert( sortIt, *eit );
++    }
++    if ( sortDirection == SortDirectionAscending ) {
++      // Append the list of Events without End DateTimes
++      eventListSorted += tempList;
++    } else {
++      // Prepend the list of Events without End DateTimes
++      tempList += eventListSorted;
++      eventListSorted = tempList;
++    }
++    break;
++
++  case EventSortSummary:
++    for ( eit = eventList.begin(); eit != eventList.end(); ++eit ) {
++      KCalCore::Event::Ptr e = CalendarSupport::event( *eit );
++      Q_ASSERT( e );
++      sortIt = eventListSorted.begin();
++      if ( sortDirection == SortDirectionAscending ) {
++        while ( sortIt != eventListSorted.end() &&
++                e->summary() >= CalendarSupport::event(*sortIt)->summary() ) {
++          ++sortIt;
++        }
++      } else {
++        while ( sortIt != eventListSorted.end() &&
++                e->summary() < CalendarSupport::event(*sortIt)->summary() ) {
++          ++sortIt;
++        }
++      }
++      eventListSorted.insert( sortIt, *eit );
++    }
++    break;
++  }
++
++  return eventListSorted;
++}
++
++Akonadi::Item::List Calendar::events( const QDate &date,
++                                      const KDateTime::Spec &timeSpec,
++                                      EventSortField sortField,
++                                      SortDirection sortDirection )
++{
++  const Akonadi::Item::List el = rawEventsForDate( date, timeSpec, sortField, sortDirection );
++  return applyCalFilter( el, filter() );
++}
++
++Akonadi::Item::List Calendar::events( const KDateTime &dt )
++{
++  const Akonadi::Item::List el = rawEventsForDate( dt );
++  return applyCalFilter( el, filter() );
++}
++
++Akonadi::Item::List Calendar::events( const QDate &start, const QDate &end,
++                                      const KDateTime::Spec &timeSpec,
++                                      bool inclusive )
++{
++  const Akonadi::Item::List el = rawEvents( start, end, timeSpec, inclusive );
++  return applyCalFilter( el, filter() );
++}
++
++Akonadi::Item::List Calendar::events( EventSortField sortField,
++                                      SortDirection sortDirection )
++{
++  const Akonadi::Item::List el = rawEvents( sortField, sortDirection );
++  return applyCalFilter( el, filter() );
++}
++
++KCalCore::Incidence::Ptr Calendar::dissociateOccurrence( const Akonadi::Item &item,
++                                                         const QDate &date,
++                                                         const KDateTime::Spec &spec,
++                                                         bool single )
++{
++  if ( !item.isValid() ) {
++    return KCalCore::Incidence::Ptr();
++  }
++
++  const KCalCore::Incidence::Ptr incidence = CalendarSupport::incidence( item );
++  if ( !incidence || !incidence->recurs() ) {
++    return KCalCore::Incidence::Ptr();
++  }
++
++  KCalCore::Incidence::Ptr newInc = KCalCore::Incidence::Ptr( incidence->clone() );
++  newInc->recreate();
++  // Do not call setRelatedTo() when dissociating recurring to-dos, otherwise the new to-do
++  // will appear as a child.  Originally, we planned to set a relation with reltype SIBLING
++  // when dissociating to-dos, but currently kcal only supports reltype PARENT.
++  // We can uncomment the following line when we support the PARENT reltype.
++  //newInc->setRelatedTo( incidence );
++  KCalCore::Recurrence *recur = newInc->recurrence();
++  if ( single ) {
++    recur->clear();
++  } else {
++    // Adjust the recurrence for the future incidences. In particular adjust
++    // the "end after n occurrences" rules! "No end date" and "end by ..."
++    // don't need to be modified.
++    int duration = recur->duration();
++    if ( duration > 0 ) {
++      int doneduration = recur->durationTo( date.addDays( -1 ) );
++      if ( doneduration >= duration ) {
++        kDebug() << "The dissociated event already occurred more often"
++                 << "than it was supposed to ever occur. ERROR!";
++        recur->clear();
++      } else {
++        recur->setDuration( duration - doneduration );
++      }
++    }
++  }
++  // Adjust the date of the incidence
++  if ( incidence->type() == KCalCore::IncidenceBase::TypeEvent ) {
++    KCalCore::Event::Ptr ev = newInc.staticCast<KCalCore::Event>();
++    KDateTime start( ev->dtStart() );
++    int daysTo = start.toTimeSpec( spec ).date().daysTo( date );
++    ev->setDtStart( start.addDays( daysTo ) );
++    ev->setDtEnd( ev->dtEnd().addDays( daysTo ) );
++  } else if ( incidence->type() == KCalCore::IncidenceBase::TypeTodo ) {
++    KCalCore::Todo::Ptr td = newInc.staticCast<KCalCore::Todo>();
++    bool haveOffset = false;
++    int daysTo = 0;
++    if ( td->hasDueDate() ) {
++      KDateTime due( td->dtDue() );
++      daysTo = due.toTimeSpec( spec ).date().daysTo( date );
++      td->setDtDue( due.addDays( daysTo ), true );
++      haveOffset = true;
++    }
++    if ( td->hasStartDate() ) {
++      KDateTime start( td->dtStart() );
++      if ( !haveOffset ) {
++        daysTo = start.toTimeSpec( spec ).date().daysTo( date );
++      }
++      td->setDtStart( start.addDays( daysTo ) );
++      haveOffset = true;
++    }
++  }
++  recur = incidence->recurrence();
++  if ( recur ) {
++    if ( single ) {
++      recur->addExDate( date );
++    } else {
++      // Make sure the recurrence of the past events ends
++      // at the corresponding day
++      recur->setEndDate( date.addDays(-1) );
++    }
++  }
++  return KCalCore::Incidence::Ptr( newInc );
++}
++
++Akonadi::Item Calendar::incidence( Akonadi::Item::Id uid ) const
++{
++  Akonadi::Item i = event( uid );
++  if ( i.isValid() ) {
++    return i;
++  }
++
++  i = todo( uid );
++  if ( i.isValid() ) {
++    return i;
++  }
++
++  i = journal( uid );
++  return i;
++}
++
++Akonadi::Item::List Calendar::incidencesFromSchedulingID( const QString &sid )
++{
++  Akonadi::Item::List result;
++  const Akonadi::Item::List incidences = rawIncidences();
++  Akonadi::Item::List::const_iterator it = incidences.begin();
++  for ( ; it != incidences.end(); ++it ) {
++    if ( CalendarSupport::incidence(*it)->schedulingID() == sid ) {
++      result.append( *it );
++    }
++  }
++  return result;
++}
++
++Akonadi::Item Calendar::incidenceFromSchedulingID( const QString &UID )
++{
++  const Akonadi::Item::List incidences = rawIncidences();
++  Akonadi::Item::List::const_iterator it = incidences.begin();
++  for ( ; it != incidences.end(); ++it ) {
++    if ( CalendarSupport::incidence(*it)->schedulingID() == UID ) {
++      // Touchdown, and the crowd goes wild
++      return *it;
++    }
++  }
++  // Not found
++  return Akonadi::Item();
++}
++
++Akonadi::Item::List Calendar::sortTodos( const Akonadi::Item::List &todoList_,
++                                         TodoSortField sortField,
++                                         SortDirection sortDirection )
++{
++  Akonadi::Item::List todoList( todoList_ );
++  Akonadi::Item::List todoListSorted;
++  Akonadi::Item::List tempList, t;
++  Akonadi::Item::List alphaList;
++  Akonadi::Item::List::Iterator sortIt;
++  Akonadi::Item::List::ConstIterator eit;
++
++  // Notice we alphabetically presort Summaries first.
++  // We do this so comparison "ties" stay in a nice order.
++
++  // Note that To-dos may not have Start DateTimes nor due DateTimes.
++
++  switch( sortField ) {
++  case TodoSortUnsorted:
++    todoListSorted = todoList;
++    break;
++
++  case TodoSortStartDate:
++    alphaList = sortTodos( todoList, TodoSortSummary, sortDirection );
++    for ( eit = alphaList.constBegin(); eit != alphaList.constEnd(); ++eit ) {
++      const KCalCore::Todo::Ptr e = CalendarSupport::todo( *eit );
++      if ( e->hasStartDate() ) {
++        sortIt = todoListSorted.begin();
++        if ( sortDirection == SortDirectionAscending ) {
++          while ( sortIt != todoListSorted.end() &&
++                  e->dtStart() >= CalendarSupport::todo(*sortIt)->dtStart() ) {
++            ++sortIt;
++          }
++        } else {
++          while ( sortIt != todoListSorted.end() &&
++                  e->dtStart() < CalendarSupport::todo(*sortIt)->dtStart() ) {
++            ++sortIt;
++          }
++        }
++        todoListSorted.insert( sortIt, *eit );
++      } else {
++        // Keep a list of the To-dos without Start DateTimes
++        tempList.append( *eit );
++      }
++    }
++    if ( sortDirection == SortDirectionAscending ) {
++      // Append the list of To-dos without Start DateTimes
++      todoListSorted += tempList;
++    } else {
++      // Prepend the list of To-dos without Start DateTimes
++      tempList += todoListSorted;
++      todoListSorted = tempList;
++    }
++    break;
++
++  case TodoSortDueDate:
++    alphaList = sortTodos( todoList, TodoSortSummary, sortDirection );
++    for ( eit = alphaList.constBegin(); eit != alphaList.constEnd(); ++eit ) {
++      const KCalCore::Todo::Ptr e = CalendarSupport::todo( *eit );
++      if ( e->hasDueDate() ) {
++        sortIt = todoListSorted.begin();
++        if ( sortDirection == SortDirectionAscending ) {
++          while ( sortIt != todoListSorted.end() &&
++                  e->dtDue() >= CalendarSupport::todo( *sortIt )->dtDue() ) {
++            ++sortIt;
++          }
++        } else {
++          while ( sortIt != todoListSorted.end() &&
++                  e->dtDue() < CalendarSupport::todo( *sortIt )->dtDue() ) {
++            ++sortIt;
++          }
++        }
++        todoListSorted.insert( sortIt, *eit );
++      } else {
++        // Keep a list of the To-dos without Due DateTimes
++        tempList.append( *eit );
++      }
++    }
++    if ( sortDirection == SortDirectionAscending ) {
++      // Append the list of To-dos without Due DateTimes
++      todoListSorted += tempList;
++    } else {
++      // Prepend the list of To-dos without Due DateTimes
++      tempList += todoListSorted;
++      todoListSorted = tempList;
++    }
++    break;
++
++  case TodoSortPriority:
++    alphaList = sortTodos( todoList, TodoSortSummary, sortDirection );
++    for ( eit = alphaList.constBegin(); eit != alphaList.constEnd(); ++eit ) {
++      const KCalCore::Todo::Ptr e = CalendarSupport::todo( *eit );
++      sortIt = todoListSorted.begin();
++      if ( sortDirection == SortDirectionAscending ) {
++        while ( sortIt != todoListSorted.end() &&
++                e->priority() >= CalendarSupport::todo(*sortIt)->priority() ) {
++          ++sortIt;
++        }
++      } else {
++        while ( sortIt != todoListSorted.end() &&
++                e->priority() < CalendarSupport::todo(*sortIt)->priority() ) {
++          ++sortIt;
++        }
++      }
++      todoListSorted.insert( sortIt, *eit );
++    }
++    break;
++
++  case TodoSortPercentComplete:
++    alphaList = sortTodos( todoList, TodoSortSummary, sortDirection );
++    for ( eit = alphaList.constBegin(); eit != alphaList.constEnd(); ++eit ) {
++      const KCalCore::Todo::Ptr e = CalendarSupport::todo( *eit );
++      sortIt = todoListSorted.begin();
++      if ( sortDirection == SortDirectionAscending ) {
++        while ( sortIt != todoListSorted.end() &&
++                e->percentComplete() >= CalendarSupport::todo(*sortIt)->percentComplete() ) {
++          ++sortIt;
++        }
++      } else {
++        while ( sortIt != todoListSorted.end() &&
++                e->percentComplete() < CalendarSupport::todo(*sortIt)->percentComplete() ) {
++          ++sortIt;
++        }
++      }
++      todoListSorted.insert( sortIt, *eit );
++    }
++    break;
++
++  case TodoSortSummary:
++    for ( eit = todoList.constBegin(); eit != todoList.constEnd(); ++eit ) {
++      const KCalCore::Todo::Ptr e = CalendarSupport::todo( *eit );
++      sortIt = todoListSorted.begin();
++      if ( sortDirection == SortDirectionAscending ) {
++        while ( sortIt != todoListSorted.end() &&
++                e->summary() >= CalendarSupport::todo(*sortIt)->summary() ) {
++          ++sortIt;
++        }
++      } else {
++        while ( sortIt != todoListSorted.end() &&
++                e->summary() < CalendarSupport::todo(*sortIt)->summary() ) {
++          ++sortIt;
++        }
++      }
++      todoListSorted.insert( sortIt, *eit );
++    }
++    break;
++  }
++
++  return todoListSorted;
++}
++
++Akonadi::Item::List Calendar::todos( TodoSortField sortField,
++                                     SortDirection sortDirection )
++{
++  const Akonadi::Item::List tl = rawTodos( sortField, sortDirection );
++  return CalendarSupport::applyCalFilter( tl, filter() );
++}
++
++Akonadi::Item::List Calendar::todos( const QDate &date )
++{
++  Akonadi::Item::List el = rawTodosForDate( date );
++  return applyCalFilter( el, filter() );
++}
++
++Akonadi::Item::List Calendar::sortJournals( const Akonadi::Item::List &journalList_,
++                                            JournalSortField sortField,
++                                            SortDirection sortDirection )
++{
++  Akonadi::Item::List journalList( journalList_ );
++  Akonadi::Item::List journalListSorted;
++  Akonadi::Item::List::Iterator sortIt;
++  Akonadi::Item::List::ConstIterator eit;
++
++  switch( sortField ) {
++  case JournalSortUnsorted:
++    journalListSorted = journalList;
++    break;
++
++  case JournalSortDate:
++    for ( eit = journalList.constBegin(); eit != journalList.constEnd(); ++eit ) {
++      const KCalCore::Journal::Ptr e = CalendarSupport::journal( *eit );
++      sortIt = journalListSorted.begin();
++      if ( sortDirection == SortDirectionAscending ) {
++        while ( sortIt != journalListSorted.end() &&
++                e->dtStart() >= CalendarSupport::journal(*sortIt)->dtStart() ) {
++          ++sortIt;
++        }
++      } else {
++        while ( sortIt != journalListSorted.end() &&
++                e->dtStart() < CalendarSupport::journal(*sortIt)->dtStart() ) {
++          ++sortIt;
++        }
++      }
++      journalListSorted.insert( sortIt, *eit );
++    }
++    break;
++
++  case JournalSortSummary:
++    for ( eit = journalList.constBegin(); eit != journalList.constEnd(); ++eit ) {
++      const KCalCore::Journal::Ptr e = CalendarSupport::journal( *eit );
++      sortIt = journalListSorted.begin();
++      if ( sortDirection == SortDirectionAscending ) {
++        while ( sortIt != journalListSorted.end() &&
++                e->summary() >= CalendarSupport::journal(*sortIt)->summary() ) {
++          ++sortIt;
++        }
++      } else {
++        while ( sortIt != journalListSorted.end() &&
++                e->summary() < CalendarSupport::journal(*sortIt)->summary() ) {
++          ++sortIt;
++        }
++      }
++      journalListSorted.insert( sortIt, *eit );
++    }
++    break;
++  }
++
++  return journalListSorted;
++}
++
++Akonadi::Item::List Calendar::journals( JournalSortField sortField,
++                                        SortDirection sortDirection )
++{
++  const Akonadi::Item::List jl = rawJournals( sortField, sortDirection );
++  return CalendarSupport::applyCalFilter( jl, filter() );
++}
++
++Akonadi::Item::List Calendar::journals( const QDate &date )
++{
++  Akonadi::Item::List el = rawJournalsForDate( date );
++  return CalendarSupport::applyCalFilter( el, filter() );
++}
++
++void Calendar::beginBatchAdding()
++{
++  emit batchAddingBegins();
++}
++
++void Calendar::endBatchAdding()
++{
++  emit batchAddingEnds();
++}
++
++#ifdef AKONADI_PORT_DISABLED
++
++void Calendar::setupRelations( const Akonadi::Item &forincidence )
++{
++  if ( !forincidence ) {
++    return;
++  }
++
++  QString uid = forincidence->uid();
++
++  // First, go over the list of orphans and see if this is their parent
++  QList<KCalCore::Incidence*> l = d->mOrphans.values( uid );
++  d->mOrphans.remove( uid );
++  for ( int i = 0, end = l.count();  i < end;  ++i ) {
++    forincidence->addRelation( l[i] );
++    d->mOrphanUids.remove( l[i]->uid() );
++  }
++
++  // Now see about this incidences parent
++  if ( !forincidence->relatedTo() && !forincidence->relatedToUid().isEmpty() ) {
++    // Incidence has a uid it is related to but is not registered to it yet.
++    // Try to find it
++    KCalCore::Incidence::Ptr parent = incidence( forincidence->relatedToUid() );
++    if ( !parent ) {
++      // Not found, put this in the mOrphans list
++      // Note that the mOrphans dict might contain multiple entries with the
++      // same key! which are multiple children that wait for the parent
++      // incidence to be inserted.
++      d->mOrphans.insert( forincidence->relatedToUid(), forincidence );
++      d->mOrphanUids.insert( forincidence->uid(), forincidence );
++    }
++  }
++  }
++#endif // AKONADI_PORT_DISABLED
++
++#ifdef AKONADI_PORT_DISABLED
++// If a to-do with sub-to-dos is deleted, move it's sub-to-dos to the orphan list
++void Calendar::removeRelations( const Akonadi::Item &incidence )
++{
++  if ( !incidence ) {
++    kDebug() << "Warning: incidence is 0";
++    return;
++  }
++
++  QString uid = incidence->uid();
++  foreach ( KCalCore::Incidence::Ptr i, incidence->relations() ) {
++    if ( !d->mOrphanUids.contains( i->uid() ) ) {
++      d->mOrphans.insert( uid, i );
++      d->mOrphanUids.insert( i->uid(), i );
++      i->setRelatedTo( uid );
++    }
++  }
++
++  // If this incidence is related to something else, tell that about it
++  if ( incidence->relatedTo() ) {
++    incidence->relatedTo()->removeRelation( incidence );
++  }
++
++  // Remove this one from the orphans list
++  if ( d->mOrphanUids.remove( uid ) ) {
++    // This incidence is located in the orphans list - it should be removed
++    // Since the mOrphans dict might contain the same key (with different
++    // child incidence pointers!) multiple times, take care that we remove
++    // the correct one. So we need to remove all items with the given
++    // parent UID, and readd those that are not for this item. Also, there
++    // might be other entries with differnet UID that point to this
++    // incidence (this might happen when the relatedTo of the item is
++    // changed before its parent is inserted. This might happen with
++    // groupware servers....). Remove them, too
++    QStringList relatedToUids;
++
++    // First, create a list of all keys in the mOrphans list which point
++    // to the removed item
++    relatedToUids << incidence->relatedToUid();
++    for ( QMultiHash<QString, Incidence*>::Iterator it = d->mOrphans.begin();
++          it != d->mOrphans.end(); ++it ) {
++      if ( it.value()->uid() == uid ) {
++        relatedToUids << it.key();
++      }
++    }
++
++    // now go through all uids that have one entry that point to the incidence
++    for ( QStringList::const_iterator uidit = relatedToUids.constBegin();
++          uidit != relatedToUids.constEnd(); ++uidit ) {
++      Incidence::List tempList;
++      // Remove all to get access to the remaining entries
++      QList<KCalCore::Incidence*> l = d->mOrphans.values( *uidit );
++      d->mOrphans.remove( *uidit );
++      foreach ( Incidence *i, l ) {
++        if ( i != incidence ) {
++          tempList.append( i );
++        }
++      }
++      // Readd those that point to a different orphan incidence
++      for ( KCalCore::Incidence::List::Iterator incit = tempList.begin();
++            incit != tempList.end(); ++incit ) {
++        d->mOrphans.insert( *uidit, *incit );
++      }
++    }
++  }
++
++  // Make sure the deleted incidence doesn't relate to a non-deleted incidence,
++  // since that would cause trouble in CalendarLocal::close(), as the deleted
++  // incidences are destroyed after the non-deleted incidences. The destructor
++  // of the deleted incidences would then try to access the already destroyed
++  // non-deleted incidence, which would segfault.
++  //
++  // So in short: Make sure dead incidences don't point to alive incidences
++  // via the relation.
++  //
++  // This crash is tested in CalendarLocalTest::testRelationsCrash().
++}
++#endif // AKONADI_PORT_DISABLED
++
++void Calendar::CalendarObserver::calendarIncidenceAdded( const Akonadi::Item &incidence )
++{
++  Q_UNUSED( incidence );
++}
++
++void Calendar::CalendarObserver::calendarIncidenceChanged( const Akonadi::Item &incidence )
++{
++  Q_UNUSED( incidence );
++}
++
++void Calendar::CalendarObserver::calendarIncidenceDeleted( const Akonadi::Item &incidence )
++{
++  Q_UNUSED( incidence );
++}
++
++void Calendar::registerObserver( CalendarObserver *observer )
++{
++  if ( !d->mObservers.contains( observer ) ) {
++    d->mObservers.append( observer );
++  }
++  d->mNewObserver = true;
++}
++
++void Calendar::unregisterObserver( CalendarObserver *observer )
++{
++  d->mObservers.removeAll( observer );
++}
++
++void Calendar::doSetTimeSpec( const KDateTime::Spec &timeSpec )
++{
++  Q_UNUSED( timeSpec );
++}
++
++void Calendar::notifyIncidenceAdded( const Akonadi::Item &i )
++{
++  if ( !d->mObserversEnabled ) {
++    return;
++  }
++
++  foreach ( CalendarObserver *observer, d->mObservers ) {
++    observer->calendarIncidenceAdded( i );
++  }
++}
++
++void Calendar::notifyIncidenceChanged( const Akonadi::Item &i )
++{
++  if ( !d->mObserversEnabled ) {
++    return;
++  }
++
++  foreach ( CalendarObserver *observer, d->mObservers ) {
++    observer->calendarIncidenceChanged( i );
++  }
++}
++
++void Calendar::notifyIncidenceDeleted( const Akonadi::Item &i )
++{
++  if ( !d->mObserversEnabled ) {
++    return;
++  }
++
++  foreach ( CalendarObserver *observer, d->mObservers ) {
++    observer->calendarIncidenceDeleted( i );
++  }
++}
++
++void Calendar::customPropertyUpdated()
++{
++}
++
++void Calendar::setProductId( const QString &id )
++{
++  d->mProductId = id;
++}
++
++QString Calendar::productId() const
++{
++  return d->mProductId;
++}
++
++Akonadi::Item::List Calendar::mergeIncidenceList( const Akonadi::Item::List &events,
++                                                  const Akonadi::Item::List &todos,
++                                                  const Akonadi::Item::List &journals )
++{
++  Akonadi::Item::List incidences;
++
++  int i, end;
++  for ( i = 0, end = events.count();  i < end;  ++i ) {
++    incidences.append( events[i] );
++  }
++
++  for ( i = 0, end = todos.count();  i < end;  ++i ) {
++    incidences.append( todos[i] );
++  }
++
++  for ( i = 0, end = journals.count();  i < end;  ++i ) {
++    incidences.append( journals[i] );
++  }
++
++  return incidences;
++}
++
++void Calendar::setObserversEnabled( bool enabled )
++{
++  d->mObserversEnabled = enabled;
++}
++
++void Calendar::appendAlarms( KCalCore::Alarm::List &alarms, const Akonadi::Item &item,
++                             const KDateTime &from, const KDateTime &to )
++{
++  const KCalCore::Incidence::Ptr incidence = CalendarSupport::incidence( item );
++  Q_ASSERT( incidence );
++
++  KDateTime preTime = from.addSecs(-1);
++
++  KCalCore::Alarm::List alarmlist = incidence->alarms();
++  for ( int i = 0, iend = alarmlist.count();  i < iend;  ++i ) {
++    if ( alarmlist[i]->enabled() ) {
++      KDateTime dt = alarmlist[i]->nextRepetition( preTime );
++      if ( dt.isValid() && dt <= to ) {
++        kDebug() << incidence->summary() << "':" << dt.toString();
++        alarms.append( alarmlist[i] );
++      }
++    }
++  }
++}
++
++void Calendar::appendRecurringAlarms( KCalCore::Alarm::List &alarms,
++                                      const Akonadi::Item &item,
++                                      const KDateTime &from,
++                                      const KDateTime &to )
++{
++  KDateTime dt;
++  bool endOffsetValid = false;
++  KCalCore::Duration endOffset( 0 );
++  KCalCore::Duration period( from, to );
++
++  const KCalCore::Incidence::Ptr incidence = CalendarSupport::incidence( item );
++  Q_ASSERT( incidence );
++
++  KCalCore::Alarm::List alarmlist = incidence->alarms();
++  for ( int i = 0, iend = alarmlist.count();  i < iend;  ++i ) {
++    KCalCore::Alarm::Ptr a = alarmlist[i];
++    if ( a->enabled() ) {
++      if ( a->hasTime() ) {
++        // The alarm time is defined as an absolute date/time
++        dt = a->nextRepetition( from.addSecs(-1) );
++        if ( !dt.isValid() || dt > to ) {
++          continue;
++        }
++      } else {
++        // Alarm time is defined by an offset from the event start or end time.
++        // Find the offset from the event start time, which is also used as the
++        // offset from the recurrence time.
++        KCalCore::Duration offset( 0 );
++        if ( a->hasStartOffset() ) {
++          offset = a->startOffset();
++        } else if ( a->hasEndOffset() ) {
++          offset = a->endOffset();
++          if ( !endOffsetValid ) {
++            endOffset = KCalCore::Duration(
++              incidence->dtStart(),
++              incidence->dateTime( KCalCore::IncidenceBase::RoleAlarmEndOffset ) );
++            endOffsetValid = true;
++          }
++        }
++
++        // Find the incidence's earliest alarm
++        KDateTime alarmStart =
++          offset.end( a->hasEndOffset() ?
++                      incidence->dateTime( KCalCore::IncidenceBase::RoleAlarmEndOffset ) :
++                      incidence->dtStart() );
++//        KDateTime alarmStart = incidence->dtStart().addSecs( offset );
++        if ( alarmStart > to ) {
++          continue;
++        }
++        KDateTime baseStart = incidence->dtStart();
++        if ( from > alarmStart ) {
++          alarmStart = from;   // don't look earlier than the earliest alarm
++          baseStart = (-offset).end( (-endOffset).end( alarmStart ) );
++        }
++
++        // Adjust the 'alarmStart' date/time and find the next recurrence at or after it.
++        // Treate the two offsets separately in case one is daily and the other not.
++        dt = incidence->recurrence()->getNextDateTime( baseStart.addSecs(-1) );
++        if ( !dt.isValid() ||
++             ( dt = endOffset.end( offset.end( dt ) ) ) > to ) // adjust 'dt' to get the alarm time
++        {
++          // The next recurrence is too late.
++          if ( !a->repeatCount() ) {
++            continue;
++          }
++
++          // The alarm has repetitions, so check whether repetitions of previous
++          // recurrences fall within the time period.
++          bool found = false;
++          KCalCore::Duration alarmDuration = a->duration();
++          for ( KDateTime base = baseStart;
++                ( dt = incidence->recurrence()->getPreviousDateTime( base ) ).isValid();
++                base = dt ) {
++            if ( a->duration().end( dt ) < base ) {
++              break;  // this recurrence's last repetition is too early, so give up
++            }
++
++            // The last repetition of this recurrence is at or after 'alarmStart' time.
++            // Check if a repetition occurs between 'alarmStart' and 'to'.
++            int snooze = a->snoozeTime().value();   // in seconds or days
++            if ( a->snoozeTime().isDaily() ) {
++              KCalCore::Duration toFromDuration( dt, base );
++              int toFrom = toFromDuration.asDays();
++              if ( a->snoozeTime().end( from ) <= to ||
++                   ( toFromDuration.isDaily() && toFrom % snooze == 0 ) ||
++                   ( toFrom / snooze + 1 ) * snooze <= toFrom + period.asDays() ) {
++                found = true;
++#ifndef NDEBUG
++                // for debug output
++                dt = offset.end( dt ).addDays( ( ( toFrom - 1 ) / snooze + 1 ) * snooze );
++#endif
++                break;
++              }
++            } else {
++              int toFrom = dt.secsTo( base );
++              if ( period.asSeconds() >= snooze ||
++                   toFrom % snooze == 0 ||
++                   ( toFrom / snooze + 1 ) * snooze <= toFrom + period.asSeconds() )
++              {
++                found = true;
++#ifndef NDEBUG
++                // for debug output
++                dt = offset.end( dt ).addSecs( ( ( toFrom - 1 ) / snooze + 1 ) * snooze );
++#endif
++                break;
++              }
++            }
++          }
++          if ( !found ) {
++            continue;
++          }
++        }
++      }
++      // kDebug() << incidence->summary() << "':" << dt.toString();
++      alarms.append( a );
++    }
++  }
++}
++
++Akonadi::Collection Calendar::collection( const Akonadi::Collection::Id &id ) const
++{
++  if ( d->m_collectionMap.contains( id ) ) {
++    return d->m_collectionMap[id];
++  } else {
++    return Akonadi::Collection();
++  }
++}
++
++bool Calendar::hasChangeRights( const Akonadi::Item &item ) const
++{
++  // if the users changes the rights, item.parentCollection()
++  // can still have the old rights, so we use call collection()
++  // which returns the updated one
++  const Akonadi::Collection col = collection( item.storageCollectionId() );
++  return col.rights() & Akonadi::Collection::CanChangeItem;
++}
++
++bool Calendar::hasDeleteRights( const Akonadi::Item &item ) const
++{
++  // if the users changes the rights, item.parentCollection()
++  // can still have the old rights, so we use call collection()
++  // which returns the updated one
++  const Akonadi::Collection col = collection( item.storageCollectionId() );
++  return col.rights() & Akonadi::Collection::CanDeleteItem;
++}
++
++int Calendar::incidencesCount() const
++{
++  return d->m_model->rowCount();
++}
+diff --git a/plasma/generic/dataengines/calendar/akonadi/calendar.h b/plasma/generic/dataengines/calendar/akonadi/calendar.h
+new file mode 100644
+index 0000000..364fc81
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/calendar.h
+@@ -0,0 +1,772 @@
++/*
++  Copyright (c) 2009 KDAB
++  Author: Sebastian Sauer <sebsauer@kdab.net>
++          Frank Osterfeld <frank@kdab.net>
++
++  This program is free software; you can redistribute it and/or modify
++  it under the terms of the GNU General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or
++  (at your option) any later version.
++
++  This program is distributed in the hope that it will be useful,
++  but WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++  GNU General Public License for more details.
++
++  You should have received a copy of the GNU General Public License
++  along with this program; if not, write to the Free Software
++  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++*/
++
++#ifndef CALENDARSUPPORT_CALENDAR_H
++#define CALENDARSUPPORT_CALENDAR_H
++
++#include <Akonadi/Item>
++
++#include <KCalCore/CustomProperties>
++#include <KCalCore/Incidence>
++
++#include <KDateTime>
++
++#include <QObject>
++
++namespace KCalCore {
++  class CalFilter;
++}
++
++class QAbstractItemModel;
++
++namespace CalendarSupport {
++
++/**
++   Calendar KCalCore::Incidence sort directions.
++*/
++enum SortDirection {
++  SortDirectionAscending,  /**< Sort in ascending order (first to last) */
++  SortDirectionDescending  /**< Sort in descending order (last to first) */
++};
++
++/**
++   Calendar Event sort keys.
++*/
++enum EventSortField {
++  EventSortUnsorted,       /**< Do not sort Events */
++  EventSortStartDate,      /**< Sort Events chronologically, by start date */
++  EventSortEndDate,        /**< Sort Events chronologically, by end date */
++  EventSortSummary         /**< Sort Events alphabetically, by summary */
++};
++
++/**
++   Calendar Todo sort keys.
++*/
++enum TodoSortField {
++  TodoSortUnsorted,        /**< Do not sort Todos */
++  TodoSortStartDate,       /**< Sort Todos chronologically, by start date */
++  TodoSortDueDate,         /**< Sort Todos chronologically, by due date */
++  TodoSortPriority,        /**< Sort Todos by priority */
++  TodoSortPercentComplete, /**< Sort Todos by percentage completed */
++  TodoSortSummary          /**< Sort Todos alphabetically, by summary */
++};
++
++/**
++  Calendar Journal sort keys.
++*/
++enum JournalSortField {
++  JournalSortUnsorted,     /**< Do not sort Journals */
++  JournalSortDate,         /**< Sort Journals chronologically by date */
++  JournalSortSummary       /**< Sort Journals alphabetically, by summary */
++};
++
++/**
++ * Implements a KCalCore::Calendar that uses Akonadi as backend.
++ */
++class Calendar : public QObject,
++                                        public KCalCore::CustomProperties,
++                                        public KCalCore::IncidenceBase::IncidenceObserver
++{
++  Q_OBJECT
++
++  Q_PROPERTY( int incidencesCount READ incidencesCount NOTIFY calendarChanged )
++  public:
++
++    /**
++      Sets the calendar Product ID to @p id.
++      @param id is a string containing the Product ID.
++      @see productId() const
++    */
++    void setProductId( const QString &id );
++
++    /**
++      Returns the calendar's Product ID.
++      @see setProductId()
++    */
++    QString productId() const;
++
++    /**
++      Sets the owner of the calendar to @p owner.
++      @param owner is a Person object.
++      @see owner()
++    */
++    void setOwner( const KCalCore::Person &owner );
++
++    /**
++      Returns the owner of the calendar.
++      @return the owner Person object.
++      @see setOwner()
++    */
++    KCalCore::Person owner() const;
++
++    /**
++      Sets the default time specification (time zone, etc.) used for creating
++      or modifying incidences in the Calendar.
++
++      The method also calls setViewTimeSpec(@p timeSpec).
++
++      @param timeSpec time specification
++    */
++    void setTimeSpec( const KDateTime::Spec &timeSpec );
++
++    /**
++       Get the time specification (time zone etc.) used for creating or
++       modifying incidences in the Calendar.
++       @return time specification
++    */
++    KDateTime::Spec timeSpec() const;
++
++    /**
++      Sets the time zone ID used for creating or modifying incidences in the
++      Calendar. This method has no effect on existing incidences.
++
++      The method also calls setViewTimeZoneId(@p timeZoneId).
++
++      @param timeZoneId is a string containing a time zone ID, which is
++      assumed to be valid. The time zone ID is used to set the time zone
++      for viewing KCalCore::Incidence date/times. If no time zone is found, the
++      viewing time specification is set to local clock time.
++      @e Example: "Europe/Berlin"
++      @see setTimeSpec()
++    */
++    void setTimeZoneId( const QString &timeZoneId );
++
++    /**
++      Returns the time zone ID used for creating or modifying incidences in
++      the calendar.
++
++      @return the string containing the time zone ID, or empty string if the
++      creation/modification time specification is not a time zone.
++    */
++    QString timeZoneId() const;
++
++    /**
++      Notes the time specification which the client application intends to
++      use for viewing the incidences in this calendar. This is simply a
++      convenience method which makes a note of the new time zone so that
++      it can be read back by viewTimeSpec(). The client application must
++      convert date/time values to the desired time zone itself.
++
++      The time specification is not used in any way by the Calendar or its
++      incidences; it is solely for use by the client application.
++
++      @param timeSpec time specification
++
++      @see viewTimeSpec()
++    */
++    void setViewTimeSpec( const KDateTime::Spec &timeSpec ) const;
++
++    /**
++      Notes the time zone Id which the client application intends to use for
++      viewing the incidences in this calendar. This is simply a convenience
++      method which makes a note of the new time zone so that it can be read
++      back by viewTimeId(). The client application must convert date/time
++      values to the desired time zone itself.
++
++      The Id is not used in any way by the Calendar or its incidences.
++      It is solely for use by the client application.
++
++      @param timeZoneId is a string containing a time zone ID, which is
++      assumed to be valid. The time zone ID is used to set the time zone
++      for viewing KCalCore::Incidence date/times. If no time zone is found, the
++      viewing time specification is set to local clock time.
++      @e Example: "Europe/Berlin"
++
++      @see viewTimeZoneId()
++    */
++    void setViewTimeZoneId( const QString &timeZoneId ) const;
++
++    /**
++      Returns the time specification used for viewing the incidences in
++      this calendar. This simply returns the time specification last
++      set by setViewTimeSpec().
++      @see setViewTimeSpec().
++    */
++    KDateTime::Spec viewTimeSpec() const;
++
++    /**
++      Returns the time zone Id used for viewing the incidences in this
++      calendar. This simply returns the time specification last set by
++      setViewTimeSpec().
++      @see setViewTimeZoneId().
++    */
++    QString viewTimeZoneId() const;
++
++    /**
++      Shifts the times of all incidences so that they appear at the same clock
++      time as before but in a new time zone. The shift is done from a viewing
++      time zone rather than from the actual incidence time zone.
++
++      For example, shifting an incidence whose start time is 09:00 America/New York,
++      using an old viewing time zone (@p oldSpec) of Europe/London, to a new time
++      zone (@p newSpec) of Europe/Paris, will result in the time being shifted
++      from 14:00 (which is the London time of the incidence start) to 14:00 Paris
++      time.
++
++      @param oldSpec the time specification which provides the clock times
++      @param newSpec the new time specification
++
++      @see isLocalTime()
++    */
++    void shiftTimes( const KDateTime::Spec &oldSpec, const KDateTime::Spec &newSpec );
++
++    /**
++      Returns a list of all categories used by KCalCore::Incidences in the calendar @p cal.
++
++      @param cal the calendar to return incidences from
++      @return a QStringList containing all the categories.
++    */
++    static QStringList categories( Calendar *cal );
++
++// KCalCore::Incidence Specific Methods //
++
++    /**
++      Returns a filtered list of all KCalCore::Incidences for this Calendar.
++      @deprecated:
++
++      @return the list of all filtered KCalCore::Incidences.
++    */
++    Akonadi::Item::List incidences();
++
++    /**
++      Returns a filtered list of all KCalCore::Incidences which occur on the given date.
++
++      @param date request filtered KCalCore::Incidence list for this QDate only.
++      @deprecated:
++
++      @return the list of filtered KCalCore::Incidences occurring on the specified date.
++    */
++    Akonadi::Item::List incidences( const QDate &date );
++
++    /**
++      Returns an unfiltered list of all KCalCore::Incidences for this Calendar.
++      @deprecated:
++
++      @return the list of all unfiltered KCalCore::Incidences.
++    */
++    Akonadi::Item::List rawIncidences();
++
++    /**
++      Returns the KCalCore::Incidence associated with the given unique identifier.
++
++      @param uid is a unique identifier string.
++      @deprecated:
++
++      @return a pointer to the KCalCore::Incidence.
++      A null pointer is returned if no such KCalCore::Incidence exists.
++    */
++    Akonadi::Item incidence( Akonadi::Item::Id id ) const;
++
++    Akonadi::Collection collection( const Akonadi::Entity::Id &id ) const;
++
++    /**
++      Returns the KCalCore::Incidence associated with the given scheduling identifier.
++
++      @param sid is a unique scheduling identifier string.
++      @deprecated:
++
++      @return a pointer to the KCalCore::Incidence.
++      A null pointer is returned if no such KCalCore::Incidence exists.
++    */
++    Akonadi::Item incidenceFromSchedulingID( const QString &sid );
++
++    /**
++      Searches all events and todos for an incidence with this
++      scheduling identifiere. Returns a list of matching results.
++      @deprecated:
++
++      @param sid is a unique scheduling identifier string.
++    */
++    Akonadi::Item::List incidencesFromSchedulingID( const QString &sid );
++
++    /**
++      Create a merged list of KCalCore::Events, KCalCore::Todos, and KCalCore::Journals.
++
++      @param events is an KCalCore::Event list to merge.
++      @param todos is a KCalCore::Todo list to merge.
++      @param journals is a KCalCore::Journal list to merge.
++      @deprecated:
++
++      @return a list of merged KCalCore::Incidences.
++    */
++    static Akonadi::Item::List mergeIncidenceList( const Akonadi::Item::List &events,
++                                                   const Akonadi::Item::List &todos,
++                                                   const Akonadi::Item::List &journals );
++
++    /**
++      Dissociate an KCalCore::Incidence from a recurring KCalCore::Incidence.
++      By default, only one single KCalCore::Incidence for the specified @a date
++      will be dissociated and returned.  If @a single is false, then
++      the recurrence will be split at @a date, the old KCalCore::Incidence will
++      have its recurrence ending at @a date and the new KCalCore::Incidence
++      will have all recurrences past the @a date.
++
++      @param incidence is a pointer to a recurring KCalCore::Incidence.
++      @param date is the QDate within the recurring KCalCore::Incidence on which
++      the dissociation will be performed.
++      @param spec is the spec in which the @a date is formulated.
++      @param single is a flag meaning that a new KCalCore::Incidence should be created
++      from the recurring KCalCore::Incidences after @a date.
++      @deprecated:
++
++      @return a pointer to a new recurring KCalCore::Incidence if @a single is false.
++    */
++    KCalCore::Incidence::Ptr dissociateOccurrence( const Akonadi::Item &incidence,
++                                                   const QDate &date,
++                                                   const KDateTime::Spec &spec,
++                                                   bool single = true );
++
++// KCalCore::Event Specific Methods //
++
++    /**
++      Sort a list of KCalCore::Events.
++
++      @param eventList is a pointer to a list of KCalCore::Events.
++      @param sortField specifies the EventSortField.
++      @param sortDirection specifies the SortDirection.
++      @deprecated:
++
++      @return a list of KCalCore::Events sorted as specified.
++    */
++    static Akonadi::Item::List sortEvents( const Akonadi::Item::List &eventList,
++                                           EventSortField sortField,
++                                           SortDirection sortDirection );
++
++    /**
++      Returns a sorted, filtered list of all KCalCore::Events for this Calendar.
++
++      @param sortField specifies the EventSortField.
++      @param sortDirection specifies the SortDirection.
++      @deprecated:
++
++      @return the list of all filtered KCalCore::Events sorted as specified.
++    */
++    virtual Akonadi::Item::List events(
++      EventSortField sortField = EventSortUnsorted,
++      SortDirection sortDirection = SortDirectionAscending );
++
++    /**
++      Returns a filtered list of all KCalCore::Events which occur on the given timestamp.
++
++      @param dt request filtered KCalCore::Event list for this KDateTime only.
++      @deprecated:
++
++      @return the list of filtered KCalCore::Events occurring on the specified timestamp.
++    */
++    Akonadi::Item::List events( const KDateTime &dt );
++
++    /**
++      Returns a filtered list of all KCalCore::Events occurring within a date range.
++
++      @param start is the starting date.
++      @param end is the ending date.
++      @param timeSpec time zone etc. to interpret @p start and @p end,
++      or the calendar's default time spec if none is specified
++      @param inclusive if true only KCalCore::Events which are completely included
++      within the date range are returned.
++      @deprecated:
++
++      @return the list of filtered KCalCore::Events occurring within the specified
++      date range.
++    */
++    Akonadi::Item::List events( const QDate &start, const QDate &end,
++                                const KDateTime::Spec &timeSpec = KDateTime::Spec(),
++                                bool inclusive = false );
++
++    /**
++      Returns a sorted, filtered list of all KCalCore::Events which occur on the given
++      date.  The KCalCore::Events are sorted according to @a sortField and
++      @a sortDirection.
++
++      @param date request filtered KCalCore::Event list for this QDate only.
++      @param timeSpec time zone etc. to interpret @p start and @p end,
++      or the calendar's default time spec if none is specified
++      @param sortField specifies the EventSortField.
++      @param sortDirection specifies the SortDirection.
++      @deprecated:
++
++      @return the list of sorted, filtered KCalCore::Events occurring on @a date.
++    */
++    Akonadi::Item::List events(
++      const QDate &date,
++      const KDateTime::Spec &timeSpec = KDateTime::Spec(),
++      EventSortField sortField = EventSortUnsorted,
++      SortDirection sortDirection = SortDirectionAscending );
++
++// KCalCore::Todo Specific Methods //
++
++    /**
++      Sort a list of KCalCore::Todos.
++
++      @param todoList is a pointer to a list of KCalCore::Todos.
++      @param sortField specifies the TodoSortField.
++      @param sortDirection specifies the SortDirection.
++      @deprecated:
++
++      @return a list of KCalCore::Todos sorted as specified.
++    */
++    static Akonadi::Item::List sortTodos( const Akonadi::Item::List &todoList,
++                                          TodoSortField sortField,
++                                          SortDirection sortDirection );
++
++    /**
++      Returns a sorted, filtered list of all KCalCore::Todos for this Calendar.
++
++      @param sortField specifies the TodoSortField.
++      @param sortDirection specifies the SortDirection.
++      @deprecated:
++
++      @return the list of all filtered KCalCore::Todos sorted as specified.
++    */
++    virtual Akonadi::Item::List todos(
++      TodoSortField sortField = TodoSortUnsorted,
++      SortDirection sortDirection = SortDirectionAscending );
++
++    /**
++      Returns a filtered list of all KCalCore::Todos which are due on the specified date.
++
++      @param date request filtered KCalCore::Todos due on this QDate.
++      @deprecated:
++
++      @return the list of filtered KCalCore::Todos due on the specified date.
++    */
++    virtual Akonadi::Item::List todos( const QDate &date );
++
++// KCalCore::Journal Specific Methods //
++
++    /**
++      Sort a list of KCalCore::Journals.
++
++      @param journalList is a pointer to a list of KCalCore::Journals.
++      @param sortField specifies the JournalSortField.
++      @param sortDirection specifies the SortDirection.
++      @deprecated:
++
++      @return a list of KCalCore::Journals sorted as specified.
++    */
++    static Akonadi::Item::List sortJournals( const Akonadi::Item::List &journalList,
++                                             JournalSortField sortField,
++                                             SortDirection sortDirection );
++
++    /**
++      Returns a sorted, filtered list of all KCalCore::Journals for this Calendar.
++
++      @param sortField specifies the JournalSortField.
++      @param sortDirection specifies the SortDirection.
++      @deprecated:
++
++      @return the list of all filtered KCalCore::Journals sorted as specified.
++    */
++    virtual Akonadi::Item::List journals(
++      JournalSortField sortField = JournalSortUnsorted,
++      SortDirection sortDirection = SortDirectionAscending );
++
++    /**
++      Returns a filtered list of all KCalCore::Journals for on the specified date.
++
++      @param date request filtered KCalCore::Journals for this QDate only.
++      @deprecated:
++
++      @return the list of filtered KCalCore::Journals for the specified date.
++    */
++    virtual Akonadi::Item::List journals( const QDate &date );
++
++    /**
++      Emits the beginBatchAdding() signal.
++
++      This should be called before adding a batch of incidences with
++      addIncidence( KCalCore::Incidence::Ptr ), addTodo( KCalCore::Todo::Ptr ),
++      addEvent( KCalCore::Event::Ptr ) or addJournal( KCalCore::Journal::Ptr ).
++      Some Calendars are connected to this signal, e.g: CalendarResources uses
++      it to know a series of incidenceAdds are related so the user isn't prompted
++      multiple times which resource to save the incidence to
++
++      @since 4.4
++    */
++    void beginBatchAdding();
++
++    /**
++      Emits the endBatchAdding() signal.
++
++      Used with beginBatchAdding(). Should be called after
++      adding all incidences.
++
++      @since 4.4
++    */
++    void endBatchAdding();
++
++// Filter Specific Methods //
++
++    /**
++      Sets the calendar filter.
++
++      @param filter a pointer to a CalFilter object which will be
++      used to filter Calendar KCalCore::Incidences.
++      @deprecated:
++
++      @see filter()
++    */
++    void setFilter( KCalCore::CalFilter *filter );
++
++    /**
++      Returns the calendar filter.
++
++      @return a pointer to the calendar CalFilter.
++      A null pointer is returned if no such CalFilter exists.
++      @deprecated:
++
++      @see setFilter()
++    */
++    KCalCore::CalFilter *filter();
++
++// Observer Specific Methods //
++
++    /**
++      @class CalendarObserver
++
++      The CalendarObserver class.
++    */
++    class CalendarObserver //krazy:exclude=dpointer
++    {
++      public:
++        /**
++          Destructor.
++        */
++        virtual ~CalendarObserver() {}
++
++        /**
++          Notify the Observer that an KCalCore::Incidence has been inserted.
++          @deprecated:
++
++          @param incidence is a pointer to the KCalCore::Incidence that was inserted.
++        */
++        virtual void calendarIncidenceAdded( const Akonadi::Item &incidence );
++
++        /**
++          Notify the Observer that an KCalCore::Incidence has been modified.
++          @deprecated:
++
++          @param incidence is a pointer to the KCalCore::Incidence that was modified.
++        */
++        virtual void calendarIncidenceChanged( const Akonadi::Item  &incidence );
++
++        /**
++          Notify the Observer that an KCalCore::Incidence has been removed.
++          @deprecated:
++
++          @param incidence is a pointer to the KCalCore::Incidence that was removed.
++        */
++        virtual void calendarIncidenceDeleted( const Akonadi::Item &incidence );
++
++    };
++
++    /**
++      Registers an Observer for this Calendar.
++
++      @param observer is a pointer to an Observer object that will be
++      watching this Calendar.
++
++      @see unregisterObserver()
++    */
++    void registerObserver( CalendarObserver *observer );
++
++    /**
++      Unregisters an Observer for this Calendar.
++
++      @param observer is a pointer to an Observer object that has been
++      watching this Calendar.
++
++      @see registerObserver()
++     */
++    void unregisterObserver( CalendarObserver *observer );
++
++    /**
++      Returns if the parent collection's rights allow deleting this item.
++      Isn't merged with hasChangeRights() for convenience.
++    */
++    bool hasDeleteRights( const Akonadi::Item &item ) const;
++
++    /**
++      Returns if the parent collection's rights allow changing this item.
++      Isn't merged with hasDeleteRights() for convenience.
++    */
++    bool hasChangeRights( const Akonadi::Item &item ) const;
++
++  Q_SIGNALS:
++    /**
++      Signals that the calendar has been modified.
++    */
++    void calendarChanged();
++
++    /**
++      @see beginBatchAdding()
++      @since 4.4
++    */
++    void batchAddingBegins();
++
++    /**
++      @see endBatchAdding()
++      @since 4.4
++    */
++    void batchAddingEnds();
++
++  protected:
++    /**
++      Let Calendar subclasses set the time specification.
++      @param timeSpec is the time specification (time zone, etc.) for
++      viewing KCalCore::Incidence dates.\n
++    */
++    virtual void doSetTimeSpec( const KDateTime::Spec &timeSpec );
++
++    /**
++      Let Calendar subclasses notify that they inserted an KCalCore::Incidence.
++      @deprecated:
++      @param incidence is a pointer to the KCalCore::Incidence object that was inserted.
++    */
++    void notifyIncidenceAdded( const Akonadi::Item &incidence );
++
++    /**
++      Let Calendar subclasses notify that they modified an KCalCore::Incidence.
++      @deprecated:
++      @param incidence is a pointer to the KCalCore::Incidence object that was modified.
++    */
++    void notifyIncidenceChanged( const Akonadi::Item &incidence );
++
++    /**
++      Let Calendar subclasses notify that they removed an KCalCore::Incidence.
++      @deprecated:
++      @param incidence is a pointer to the KCalCore::Incidence object that was removed.
++    */
++    void notifyIncidenceDeleted( const Akonadi::Item &incidence );
++
++    /**
++      @copydoc
++      CustomProperties::customPropertyUpdated()
++    */
++    virtual void customPropertyUpdated();
++
++    /**
++      Let Calendar subclasses notify that they enabled an Observer.
++      @param enabled if true tells the calendar that a subclass has
++      enabled an Observer.
++    */
++    void setObserversEnabled( bool enabled );
++
++    /**
++      Appends alarms of incidence in interval to list of alarms.
++
++     @param alarms is a List of KCalCore::Alarms to be appended onto.
++     @param incidence is a pointer to an KCalCore::Incidence containing the KCalCore::Alarm
++     to be appended.
++     @param from is the lower range of the next KCalCore::Alarm repitition.
++     @param to is the upper range of the next KCalCore::Alarm repitition.
++     @deprecated:
++    */
++    void appendAlarms( KCalCore::Alarm::List &alarms, const Akonadi::Item &incidence,
++                       const KDateTime &from, const KDateTime &to );
++
++    /**
++      Appends alarms of recurring events in interval to list of alarms.
++
++      @param alarms is a List of KCalCore::Alarms to be appended onto.
++      @param incidence is a pointer to an KCalCore::Incidence containing the KCalCore::Alarm
++      to be appended.
++      @param from is the lower range of the next KCalCore::Alarm repitition.
++      @param to is the upper range of the next KCalCore::Alarm repitition.
++      @deprecated:
++    */
++    void appendRecurringAlarms( KCalCore::Alarm::List &alarms, const Akonadi::Item &incidence,
++                                const KDateTime &from, const KDateTime &to );
++  public:
++    explicit Calendar( QAbstractItemModel *treeModel, QAbstractItemModel *model,
++                       const KDateTime::Spec &timeSpec, QObject *parent=0 );
++    ~Calendar();
++
++    QAbstractItemModel *model() const;
++
++    QAbstractItemModel *unfilteredModel() const;
++    void setUnfilteredModel( QAbstractItemModel *model );
++
++    QAbstractItemModel *treeModel() const;
++
++    void incidenceUpdated( const QString &uid, const KDateTime &recurrenceId );
++    void incidenceUpdate( const QString &uid, const KDateTime &recurrenceId );
++
++    Akonadi::Item ::List rawEvents( EventSortField sortField = EventSortUnsorted,
++                                    SortDirection sortDirection = SortDirectionAscending );
++
++    Akonadi::Item ::List rawEvents( const QDate &start, const QDate &end,
++                                    const KDateTime::Spec &timeSpec = KDateTime::Spec(),
++                                    bool inclusive = false );
++
++    Akonadi::Item ::List rawEventsForDate( const QDate &date,
++                                           const KDateTime::Spec &timeSpec = KDateTime::Spec(),
++                                           EventSortField sortField = EventSortUnsorted,
++                                           SortDirection sortDirection = SortDirectionAscending );
++
++    Akonadi::Item::List rawEventsForDate( const KDateTime &dt );
++
++    Akonadi::Item event( Akonadi::Item::Id id ) const;
++
++    Akonadi::Item::List rawTodos( TodoSortField sortField = TodoSortUnsorted,
++                                  SortDirection sortDirection = SortDirectionAscending );
++
++    Akonadi::Item::List rawTodosForDate( const QDate &date );
++
++    Akonadi::Item todo( Akonadi::Item::Id uid ) const;
++
++    Akonadi::Item::List rawJournals( JournalSortField sortField = JournalSortUnsorted,
++                                     SortDirection sortDirection = SortDirectionAscending );
++
++    Akonadi::Item::List rawJournalsForDate( const QDate &date );
++
++    Akonadi::Item journal( Akonadi::Item::Id id ) const;
++
++    KCalCore::Alarm::List alarms( const KDateTime &from, const KDateTime &to, bool excludeBlockedAlarms = false );
++    KCalCore::Alarm::List alarmsTo( const KDateTime &to );
++
++    Akonadi::Item findParent( const Akonadi::Item &item ) const;
++
++    Akonadi::Item::List findChildren( const KCalCore::Incidence::Ptr &incidence ) const;
++    Akonadi::Item::List findChildren( const Akonadi::Item &item ) const;
++    bool isChild( const Akonadi::Item &parent, const Akonadi::Item &child ) const;
++
++    Akonadi::Item::Id itemIdForIncidenceUid( const QString &uid ) const;
++    Akonadi::Item itemForIncidenceUid( const QString &uid ) const;
++
++    /**
++     * Returns the number of incidences in the calendar.
++     */
++    int incidencesCount() const;
++
++    using QObject::event;   // prevent warning about hidden virtual method
++
++  Q_SIGNALS:
++    void signalErrorMessage( const QString & );
++
++  private:
++    Q_DISABLE_COPY( Calendar )
++    class Private;
++    Private *const d;
++};
++
++}
++
++#endif
+diff --git a/plasma/generic/dataengines/calendar/akonadi/calendar_p.h b/plasma/generic/dataengines/calendar/akonadi/calendar_p.h
+new file mode 100644
+index 0000000..f9b92de
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/calendar_p.h
+@@ -0,0 +1,161 @@
++/*
++  Copyright (c) 2009 KDAB
++  Authors: Sebastian Sauer <sebsauer@kdab.net>
++           Till Adam <till@kdab.net>
++           Frank Osterfeld <frank@kdab.net>
++
++  This program is free software; you can redistribute it and/or modify
++  it under the terms of the GNU General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or
++  (at your option) any later version.
++
++  This program is distributed in the hope that it will be useful,
++  but WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++  GNU General Public License for more details.
++
++  You should have received a copy of the GNU General Public License along
++  with this program; if not, write to the Free Software Foundation, Inc.,
++  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++*/
++
++#ifndef CALENDARSUPPORT_CALENDAR_P_H
++#define CALENDARSUPPORT_CALENDAR_P_H
++
++#include "calendar.h"
++#include "calfilterproxymodel.h"
++
++#include <Akonadi/Collection>
++
++#include <KCalCore/CalFilter>
++#include <KCalCore/ICalTimeZones>
++
++#include <QObject>
++
++namespace CalendarSupport {
++
++class CalendarCollection : public QObject
++{
++  Q_OBJECT
++  public:
++    Calendar *m_calendar;
++    Akonadi::Collection m_collection;
++
++    CalendarCollection( Calendar *calendar, const Akonadi::Collection &collection )
++      : QObject(), m_calendar(calendar), m_collection(collection)
++    {
++    }
++
++    ~CalendarCollection()
++    {
++    }
++};
++
++struct UnseenItem
++{
++  Akonadi::Entity::Id collection;
++  QString uid;
++
++  bool operator<( const UnseenItem &other ) const
++  {
++    if ( collection != other.collection ) {
++      return collection < other.collection;
++    }
++    return uid < other.uid;
++  }
++};
++
++class Calendar::Private : public QObject
++{
++  Q_OBJECT
++  private:
++    void removeItemFromMaps( const Akonadi::Item &item );
++    Calendar *const q;
++
++  public:
++    explicit Private( QAbstractItemModel *treeModel, QAbstractItemModel *model, Calendar *q );
++    ~Private();
++
++    enum UpdateMode {
++      DontCare,
++      AssertExists,
++      AssertNew
++    };
++
++    void updateItem( const Akonadi::Item &item, UpdateMode mode );
++    void itemChanged( const Akonadi::Item &item );
++
++    void assertInvariants() const;
++    void appendVirtualItems( Akonadi::Item::List &itemList );
++    //CalendarBase begin
++
++    KDateTime::Spec timeZoneIdSpec( const QString &timeZoneId, bool view );
++    QString mProductId;
++    KCalCore::Person mOwner;
++    KCalCore::ICalTimeZones *mTimeZones; // collection of time zones used in this calendar
++    KCalCore::ICalTimeZone mBuiltInTimeZone;   // cached time zone lookup
++    KCalCore::ICalTimeZone mBuiltInViewTimeZone;   // cached viewing time zone lookup
++    KDateTime::Spec mTimeSpec;
++    mutable KDateTime::Spec mViewTimeSpec;
++    bool mModified;
++    bool mNewObserver;
++    bool mObserversEnabled;
++    QList<CalendarObserver*> mObservers;
++
++    KCalCore::CalFilter *mDefaultFilter;
++    //CalendarBase end
++
++    QAbstractItemModel *m_treeModel;
++    QAbstractItemModel *m_model;
++    CalFilterProxyModel *m_filterProxy;
++    QHash<Akonadi::Item::Id, Akonadi::Item> m_itemMap; // akonadi id to items
++    QHash<Akonadi::Entity::Id, Akonadi::Collection> m_collectionMap; // akonadi id to collections
++
++    // child to parent map, for already cached parents
++    QHash<Akonadi::Item::Id, Akonadi::Item::Id> m_childToParent;
++
++    //parent to children map for alread cached children
++    QHash<Akonadi::Item::Id, QList<Akonadi::Item::Id> > m_parentToChildren;
++
++    QMap<UnseenItem, Akonadi::Item::Id> m_uidToItemId;
++
++    // child to parent map, unknown/not cached parent items
++    QHash<Akonadi::Item::Id, UnseenItem> m_childToUnseenParent;
++
++    QMap<UnseenItem, QList<Akonadi::Item::Id> > m_unseenParentToChildren;
++
++    // on start dates/due dates of non-recurring, single-day Incidences
++    QMultiHash<QString, Akonadi::Item::Id> m_itemIdsForDate;
++
++    QHash<Akonadi::Item::Id, QString> m_itemDateForItemId;
++
++    // From search folders.
++    QHash<Akonadi::Item::Id, QList<Akonadi::Item> > m_virtualItems;
++
++    void clear();
++    void readFromModel();
++
++  public Q_SLOTS:
++    void itemsAdded( const Akonadi::Item::List &items );
++    void itemsRemoved( const Akonadi::Item::List &items );
++
++    void collectionsAdded( const Akonadi::Collection::List &collections );
++    void collectionsRemoved( const Akonadi::Collection::List &collections );
++
++    void rowsInserted( const QModelIndex &index, int start, int end );
++    void rowsAboutToBeRemoved( const QModelIndex &index, int start, int end );
++    void rowsInsertedInTreeModel( const QModelIndex &index, int start, int end );
++    void rowsAboutToBeRemovedInTreeModel( const QModelIndex &index, int start, int end );
++    void dataChangedInTreeModel( const QModelIndex &topLeft, const QModelIndex &bottomRight );
++
++    void layoutChanged();
++    void modelReset();
++    void dataChanged( const QModelIndex &topLeft, const QModelIndex &bottomRight );
++
++    void onRowsMovedInTreeModel( const QModelIndex &sourceParent, int sourceStart, int sourceEnd,
++                                 const QModelIndex &destinationParent, int destinationRow );
++};
++
++}
++
++#endif
+diff --git a/plasma/generic/dataengines/calendar/akonadi/calendarmodel.cpp b/plasma/generic/dataengines/calendar/akonadi/calendarmodel.cpp
+new file mode 100644
+index 0000000..251a615
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/calendarmodel.cpp
+@@ -0,0 +1,248 @@
++/*
++  Copyright (c) 2008 Bruno Virlet <bvirlet@kdemail.net>
++                2009 KDAB; Author: Frank Osterfeld <osterfeld@kde.org>
++
++  This library is free software; you can redistribute it and/or modify it
++  under the terms of the GNU Library General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or (at your
++  option) any later version.
++
++  This library is distributed in the hope that it will be useful, but WITHOUT
++  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Library General Public
++  License for more details.
++
++  You should have received a copy of the GNU Library General Public License
++  along with this library; see the file COPYING.LIB.  If not, write to the
++  Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++  02110-1301, USA.
++*/
++
++#include "calendarmodel.h"
++#include "utils.h"
++
++#include <Akonadi/ChangeRecorder>
++#include <Akonadi/ItemFetchScope>
++
++#include <KDateTime>
++#include <KIconLoader>
++#include <KLocale>
++
++#include <QPixmap>
++
++using namespace CalendarSupport;
++
++class CalendarModel::Private
++{
++  public:
++    explicit Private( CalendarModel *qq )
++    :q( qq )
++    {
++    }
++
++  private:
++    CalendarModel *const q;
++};
++
++CalendarModel::CalendarModel( Akonadi::ChangeRecorder *monitor, QObject *parent )
++  : EntityTreeModel( monitor, parent ),
++    d( new Private( this ) )
++{
++  monitor->itemFetchScope().fetchAllAttributes( true );
++}
++
++CalendarModel::~CalendarModel()
++{
++  delete d;
++}
++
++static KDateTime primaryDateForIncidence( const Akonadi::Item &item )
++{
++  if ( const KCalCore::Todo::Ptr t = CalendarSupport::todo( item ) ) {
++    return t->hasDueDate() ? t->dtDue() : KDateTime();
++  }
++
++  if ( const KCalCore::Event::Ptr e = CalendarSupport::event( item ) ) {
++    return ( !e->recurs() && !e->isMultiDay() ) ? e->dtStart() : KDateTime();
++  }
++
++  if ( const KCalCore::Journal::Ptr j = CalendarSupport::journal( item ) ) {
++    return j->dtStart();
++  }
++
++  return KDateTime();
++}
++
++QVariant CalendarModel::entityData( const Akonadi::Item &item, int column, int role ) const
++{
++  const KCalCore::Incidence::Ptr incidence = CalendarSupport::incidence( item );
++  if ( !incidence ) {
++    return QVariant();
++  }
++
++  switch( role ) {
++  case Qt::DecorationRole:
++    if ( column != Summary ) {
++      return QVariant();
++    }
++    if ( incidence->type() == KCalCore::IncidenceBase::TypeTodo ) {
++      return SmallIcon( QLatin1String( "view-pim-tasks" ) );
++    }
++    if ( incidence->type() == KCalCore::IncidenceBase::TypeJournal ) {
++      return SmallIcon( QLatin1String( "view-pim-journal" ) );
++    }
++    if ( incidence->type() == KCalCore::IncidenceBase::TypeEvent ) {
++      return SmallIcon( QLatin1String( "view-calendar" ) );
++    }
++    return SmallIcon( QLatin1String( "network-wired" ) );
++
++  case Qt::DisplayRole:
++    switch( column ) {
++    case Summary:
++      return incidence->summary();
++
++    case DateTimeStart:
++      return incidence->dtStart().toString();
++
++    case DateTimeEnd:
++      return incidence->dateTime( KCalCore::Incidence::RoleEndTimeZone ).toString();
++
++    case DateTimeDue:
++      if ( KCalCore::Todo::Ptr todo = CalendarSupport::todo( item ) ) {
++        return todo->dtDue().toString();
++      } else {
++        return QVariant();
++      }
++
++    case Priority:
++      if ( KCalCore::Todo::Ptr todo = CalendarSupport::todo( item ) ) {
++        return todo->priority();
++      } else {
++        return QVariant();
++      }
++
++    case PercentComplete:
++      if ( KCalCore::Todo::Ptr todo = CalendarSupport::todo( item ) ) {
++        return todo->percentComplete();
++      } else {
++        return QVariant();
++      }
++
++    case PrimaryDate:
++      return primaryDateForIncidence( item ).toString();
++
++    case Type:
++
++      return incidence->type();
++    default:
++      break;
++    }
++
++    case SortRole:
++    switch( column ) {
++    case Summary:
++      return incidence->summary();
++
++    case DateTimeStart:
++      return incidence->dtStart().toUtc().dateTime();
++
++    case DateTimeEnd:
++      return incidence->dateTime( KCalCore::Incidence::RoleEndTimeZone ).toUtc().dateTime();
++
++    case DateTimeDue:
++      if ( KCalCore::Todo::Ptr todo = CalendarSupport::todo( item ) ) {
++        return todo->dtDue().toUtc().dateTime();
++      } else {
++        return QVariant();
++      }
++
++    case PrimaryDate:
++      return primaryDateForIncidence( item ).toUtc().dateTime();
++
++    case Priority:
++      if ( KCalCore::Todo::Ptr todo = CalendarSupport::todo( item ) ) {
++        return todo->priority();
++      } else {
++        return QVariant();
++      }
++
++    case PercentComplete:
++      if ( KCalCore::Todo::Ptr todo = CalendarSupport::todo( item ) ) {
++        return todo->percentComplete();
++      } else {
++        return QVariant();
++      }
++
++    case Type:
++      return incidence->type();
++
++    default:
++      break;
++    }
++
++    return QVariant();
++
++  case RecursRole:
++    return incidence->recurs();
++
++  default:
++    return QVariant();
++  }
++
++  return QVariant();
++}
++
++QVariant CalendarModel::entityData( const Akonadi::Collection &collection,
++                                    int column, int role ) const
++{
++  return EntityTreeModel::entityData( collection, column, role );
++}
++
++int CalendarModel::entityColumnCount( EntityTreeModel::HeaderGroup headerSet ) const
++{
++  if ( headerSet == EntityTreeModel::ItemListHeaders ) {
++    return ItemColumnCount;
++  } else {
++    return CollectionColumnCount;
++  }
++}
++
++QVariant CalendarModel::entityHeaderData( int section, Qt::Orientation orientation,
++                                          int role, EntityTreeModel::HeaderGroup headerSet ) const
++{
++  if ( role != Qt::DisplayRole || orientation != Qt::Horizontal ) {
++    return QVariant();
++  }
++
++  if ( headerSet == EntityTreeModel::ItemListHeaders ) {
++    switch( section ) {
++    case Summary:
++      return i18nc( "@title:column calendar event summary", "Summary" );
++    case DateTimeStart:
++      return i18nc( "@title:column calendar event start date and time", "Start Date and Time" );
++    case DateTimeEnd:
++      return i18nc( "@title:column calendar event end date and time", "End Date and Time" );
++    case Type:
++      return i18nc( "@title:column calendar event type", "Type" );
++    case DateTimeDue:
++      return i18nc( "@title:column todo item due date and time", "Due Date and Time" );
++    case Priority:
++      return i18nc( "@title:column todo item priority", "Priority" );
++    case PercentComplete:
++      return i18nc( "@title:column todo item completion in percent", "Complete" );
++    default:
++      return QVariant();
++    }
++  }
++
++  if ( headerSet == EntityTreeModel::CollectionTreeHeaders ) {
++    switch ( section ) {
++    case CollectionTitle:
++      return i18nc( "@title:column calendar title", "Calendar" );
++    default:
++      return QVariant();
++    }
++  }
++  return QVariant();
++}
++
+diff --git a/plasma/generic/dataengines/calendar/akonadi/calendarmodel.h b/plasma/generic/dataengines/calendar/akonadi/calendarmodel.h
+new file mode 100644
+index 0000000..1acbfdd
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/calendarmodel.h
+@@ -0,0 +1,79 @@
++/*
++  Copyright (c) 2009 KDAB
++  Author: Frank Osterfeld <osterfeld@kde.org>
++
++  This library is free software; you can redistribute it and/or modify it
++  under the terms of the GNU Library General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or (at your
++  option) any later version.
++
++  This library is distributed in the hope that it will be useful, but WITHOUT
++  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Library General Public
++  License for more details.
++
++  You should have received a copy of the GNU Library General Public License
++  along with this library; see the file COPYING.LIB.  If not, write to the
++  Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++  02110-1301, USA.
++*/
++
++#ifndef CALENDARSUPPORT_CALENDARMODEL_H
++#define CALENDARSUPPORT_CALENDARMODEL_H
++
++#include <Akonadi/EntityTreeModel>
++
++namespace CalendarSupport {
++
++class CalendarModel : public Akonadi::EntityTreeModel
++{
++  Q_OBJECT
++  public:
++    enum ItemColumn {
++      Summary=0,
++      Type,
++      DateTimeStart,
++      DateTimeEnd,
++      DateTimeDue,
++      PrimaryDate,
++      Priority,
++      PercentComplete,
++      ItemColumnCount
++    };
++
++    enum CollectionColumn {
++      CollectionTitle=0,
++      CollectionColumnCount
++    };
++
++    enum Role {
++      SortRole=Akonadi::EntityTreeModel::UserRole,
++      RecursRole
++    };
++
++    explicit CalendarModel( Akonadi::ChangeRecorder *monitor, QObject *parent = 0 );
++    ~CalendarModel();
++
++    /* reimp */
++    QVariant entityData( const Akonadi::Item &item, int column, int role=Qt::DisplayRole ) const;
++
++    /* reimp */
++    QVariant entityData( const Akonadi::Collection &collection, int column,
++                         int role=Qt::DisplayRole ) const;
++
++    /* reimp */
++    int entityColumnCount( EntityTreeModel::HeaderGroup headerSet ) const;
++
++    /* reimp */
++    QVariant entityHeaderData( int section, Qt::Orientation orientation, int role,
++                               EntityTreeModel::HeaderGroup headerSet ) const;
++
++  private:
++    class Private;
++    Private *const d;
++};
++
++}
++
++#endif
++
+diff --git a/plasma/generic/dataengines/calendar/akonadi/calfilterproxymodel.cpp b/plasma/generic/dataengines/calendar/akonadi/calfilterproxymodel.cpp
+new file mode 100644
+index 0000000..1820084
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/calfilterproxymodel.cpp
+@@ -0,0 +1,90 @@
++/*
++  Copyright (c) 2009 KDAB
++  Author: Frank Osterfeld <osterfeld@kde.org>
++
++  This library is free software; you can redistribute it and/or modify it
++  under the terms of the GNU Library General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or (at your
++  option) any later version.
++
++  This library is distributed in the hope that it will be useful, but WITHOUT
++  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Library General Public
++  License for more details.
++
++  You should have received a copy of the GNU Library General Public License
++  along with this library; see the file COPYING.LIB.  If not, write to the
++  Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++  02110-1301, USA.
++*/
++
++#include "calfilterproxymodel.h"
++#include "calendarmodel.h"
++
++#include <Akonadi/Item>
++
++#include <KCalCore/CalFilter>
++#include <KCalCore/Incidence>
++
++using namespace CalendarSupport;
++
++class CalFilterProxyModel::Private
++{
++  public:
++    explicit Private() : filter( 0 ) {}
++    KCalCore::CalFilter *filter;
++};
++
++CalFilterProxyModel::CalFilterProxyModel( QObject *parent )
++  : QSortFilterProxyModel( parent ), d( new Private )
++{
++  setSortRole( CalendarModel::SortRole );
++  setFilterKeyColumn( 0 );
++}
++
++CalFilterProxyModel::~CalFilterProxyModel()
++{
++  delete d;
++}
++
++KCalCore::CalFilter *CalFilterProxyModel::filter() const
++{
++  return d->filter;
++}
++
++void CalFilterProxyModel::setFilter( KCalCore::CalFilter *filter )
++{
++  if ( filter == d->filter ) {
++    return;
++  }
++
++  d->filter = filter;
++  invalidateFilter();
++}
++
++bool CalFilterProxyModel::filterAcceptsRow( int source_row, const QModelIndex &source_parent ) const
++{
++  if ( !d->filter ) {
++    return true;
++  }
++  if ( source_row < 0 || !source_parent.isValid() ) {
++    return false;
++  }
++
++  const QModelIndex idx = sourceModel()->index( source_row, 0, source_parent );
++  if ( !idx.isValid() ) {
++    return false;
++  }
++
++  const Akonadi::Item item = idx.data( Akonadi::EntityTreeModel::ItemRole ).value<Akonadi::Item>();
++  if ( !item.isValid() || !item.hasPayload<KCalCore::Incidence::Ptr>() ) {
++    return false;
++  }
++
++  const KCalCore::Incidence::Ptr inc = item.payload<KCalCore::Incidence::Ptr>();
++  if ( !inc ) {
++    return false;
++  }
++
++  return d->filter->filterIncidence( inc );
++}
+diff --git a/plasma/generic/dataengines/calendar/akonadi/calfilterproxymodel.h b/plasma/generic/dataengines/calendar/akonadi/calfilterproxymodel.h
+new file mode 100644
+index 0000000..fe62155
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/calfilterproxymodel.h
+@@ -0,0 +1,51 @@
++/*
++  Copyright (c) 2009 KDAB
++  Author: Frank Osterfeld <osterfeld@kde.org>
++
++  This library is free software; you can redistribute it and/or modify it
++  under the terms of the GNU Library General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or (at your
++  option) any later version.
++
++  This library is distributed in the hope that it will be useful, but WITHOUT
++  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Library General Public
++  License for more details.
++
++  You should have received a copy of the GNU Library General Public License
++  along with this library; see the file COPYING.LIB.  If not, write to the
++  Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
++  02110-1301, USA.
++*/
++#ifndef CALENDARSUPPORT_CALFILTERPROXYMODEL_H
++#define CALENDARSUPPORT_CALFILTERPROXYMODEL_H
++
++#include <QtGui/QSortFilterProxyModel>
++
++namespace KCalCore {
++  class CalFilter;
++}
++
++namespace CalendarSupport {
++
++class CalFilterProxyModel : public QSortFilterProxyModel
++{
++  Q_OBJECT
++  public:
++    explicit CalFilterProxyModel( QObject *parent=0 );
++    ~CalFilterProxyModel();
++
++    KCalCore::CalFilter *filter() const;
++    void setFilter( KCalCore::CalFilter *filter );
++
++  protected:
++    /* reimp */ bool filterAcceptsRow( int source_row, const QModelIndex &source_parent ) const;
++
++  private:
++    class Private;
++    Private *const d;
++};
++
++}
++
++#endif
+diff --git a/plasma/generic/dataengines/calendar/akonadi/collectionselection.cpp b/plasma/generic/dataengines/calendar/akonadi/collectionselection.cpp
+new file mode 100644
+index 0000000..41e03da
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/collectionselection.cpp
+@@ -0,0 +1,104 @@
++/*
++  Copyright (c) 2009 KDAB
++  Author: Frank Osterfeld <frank@kdab.net>
++
++  This program is free software; you can redistribute it and/or modify
++  it under the terms of the GNU General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or
++  (at your option) any later version.
++
++  This program is distributed in the hope that it will be useful,
++  but WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++  GNU General Public License for more details.
++
++  You should have received a copy of the GNU General Public License along
++  with this program; if not, write to the Free Software Foundation, Inc.,
++  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++
++  As a special exception, permission is given to link this program
++  with any edition of Qt, and distribute the resulting executable,
++  without including the source code for Qt in the source distribution.
++*/
++
++#include "collectionselection.h"
++#include "utils.h"
++
++#include <QItemSelectionModel>
++
++using namespace CalendarSupport;
++
++class CollectionSelection::Private
++{
++  public:
++    explicit Private( QItemSelectionModel *model_ ) : model( model_ )
++    {
++    }
++
++    QItemSelectionModel *model;
++};
++
++CollectionSelection::CollectionSelection( QItemSelectionModel *selectionModel, QObject *parent )
++  : QObject( parent ), d( new Private ( selectionModel ) )
++{
++  connect( selectionModel, SIGNAL(selectionChanged(QItemSelection,QItemSelection)),
++           this, SLOT(slotSelectionChanged(QItemSelection,QItemSelection)) );
++}
++
++CollectionSelection::~CollectionSelection()
++{
++  delete d;
++}
++
++QItemSelectionModel *CollectionSelection::model() const
++{
++  return d->model;
++}
++
++bool CollectionSelection::hasSelection() const
++{
++  return d->model->hasSelection();
++}
++
++bool CollectionSelection::contains( const Akonadi::Collection &c ) const
++{
++  return selectedCollectionIds().contains( c.id() );
++}
++
++bool CollectionSelection::contains( const Akonadi::Collection::Id &id ) const
++{
++  return selectedCollectionIds().contains( id );
++}
++
++Akonadi::Collection::List CollectionSelection::selectedCollections() const
++{
++  Akonadi::Collection::List selected;
++  Q_FOREACH ( const QModelIndex &idx, d->model->selectedIndexes() ) {
++    selected.append( collectionFromIndex( idx ) );
++  }
++  return selected;
++}
++
++QList<Akonadi::Collection::Id> CollectionSelection::selectedCollectionIds() const
++{
++  QList<Akonadi::Collection::Id> selected;
++  Q_FOREACH ( const QModelIndex &idx, d->model->selectedIndexes() ) {
++    selected.append( collectionIdFromIndex( idx ) );
++  }
++  return selected;
++}
++
++void CollectionSelection::slotSelectionChanged( const QItemSelection &selectedIndexes,
++                                                const QItemSelection &deselIndexes )
++{
++  const Akonadi::Collection::List selected = collectionsFromIndexes( selectedIndexes.indexes() );
++  const Akonadi::Collection::List deselected = collectionsFromIndexes( deselIndexes.indexes() );
++
++  emit selectionChanged( selected, deselected );
++  Q_FOREACH ( const Akonadi::Collection &c, deselected ) {
++    emit collectionDeselected( c );
++  }
++  Q_FOREACH ( const Akonadi::Collection &c, selected ) {
++    emit collectionSelected( c );
++  }
++}
+diff --git a/plasma/generic/dataengines/calendar/akonadi/collectionselection.h b/plasma/generic/dataengines/calendar/akonadi/collectionselection.h
+new file mode 100644
+index 0000000..4447afb
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/collectionselection.h
+@@ -0,0 +1,67 @@
++/*
++  Copyright (c) 2009 KDAB
++  Author: Frank Osterfeld <frank@kdab.net>
++
++  This program is free software; you can redistribute it and/or modify
++  it under the terms of the GNU General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or
++  (at your option) any later version.
++
++  This program is distributed in the hope that it will be useful,
++  but WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++  GNU General Public License for more details.
++
++  You should have received a copy of the GNU General Public License along
++  with this program; if not, write to the Free Software Foundation, Inc.,
++  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++
++  As a special exception, permission is given to link this program
++  with any edition of Qt, and distribute the resulting executable,
++  without including the source code for Qt in the source distribution.
++*/
++
++#ifndef CALENDARSUPPORT_COLLECTIONSELECTION_H
++#define CALENDARSUPPORT_COLLECTIONSELECTION_H
++
++#include <QObject>
++
++#include <Akonadi/Collection>
++
++class QItemSelection;
++class QItemSelectionModel;
++
++namespace CalendarSupport {
++
++class CollectionSelection : public QObject
++{
++  Q_OBJECT
++  public:
++    explicit CollectionSelection( QItemSelectionModel *selectionModel, QObject *parent = 0 );
++    ~CollectionSelection();
++
++    QItemSelectionModel *model() const;
++    Akonadi::Collection::List selectedCollections() const;
++    QList<Akonadi::Collection::Id> selectedCollectionIds() const;
++    bool contains( const Akonadi::Collection &c ) const;
++    bool contains( const Akonadi::Collection::Id &id ) const;
++
++    bool hasSelection() const;
++
++  Q_SIGNALS:
++    void selectionChanged( const Akonadi::Collection::List &selected,
++                           const Akonadi::Collection::List &deselected );
++    void collectionDeselected( const Akonadi::Collection & );
++    void collectionSelected( const Akonadi::Collection & );
++
++  private Q_SLOTS:
++    void slotSelectionChanged( const QItemSelection &, const QItemSelection & );
++
++  private:
++    class Private;
++    Private *const d;
++};
++
++}
++
++#endif
+diff --git a/plasma/generic/dataengines/calendar/akonadi/utils.cpp b/plasma/generic/dataengines/calendar/akonadi/utils.cpp
+new file mode 100644
+index 0000000..895edf9
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/utils.cpp
+@@ -0,0 +1,707 @@
++/*
++  Copyright (c) 2009, 2010 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com
++  Copyright (C) 2009 KDAB (author: Frank Osterfeld <osterfeld@kde.org>)
++  Copyright (c) 2010 Andras Mantia <andras@kdab.com>
++
++  This program is free software; you can redistribute it and/or modify
++  it under the terms of the GNU General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or
++  (at your option) any later version.
++
++  This program is distributed in the hope that it will be useful,
++  but WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++  GNU General Public License for more details.
++
++  You should have received a copy of the GNU General Public License along
++  with this program; if not, write to the Free Software Foundation, Inc.,
++  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++
++  As a special exception, permission is given to link this program
++  with any edition of Qt, and distribute the resulting executable,
++  without including the source code for Qt in the source distribution.
++*/
++
++#include "utils.h"
++/*#include "kcalprefs.h"
++#include "mailclient.h"
++#include "mailscheduler.h"
++#include "publishdialog.h"*/
++
++#include <Akonadi/Collection>
++#include <Akonadi/CollectionDialog>
++#include <Akonadi/EntityDisplayAttribute>
++#include <Akonadi/EntityTreeModel>
++#include <Akonadi/Item>
++
++#include <KHolidays/Holidays>
++
++#include <KCalCore/CalFilter>
++#include <KCalCore/Event>
++#include <KCalCore/FreeBusy>
++#include <KCalCore/Incidence>
++#include <KCalCore/Journal>
++#include <KCalCore/MemoryCalendar>
++#include <KCalCore/Todo>
++#include <KCalCore/ICalFormat>
++
++#include <KCalUtils/DndFactory>
++#include <KCalUtils/ICalDrag>
++#include <KCalUtils/VCalDrag>
++
++#include <Mailtransport/TransportManager>
++
++#include <KIconLoader>
++#include <KLocale>
++#include <KUrl>
++
++#include <QAbstractItemModel>
++#include <QDrag>
++#include <QMimeData>
++#include <QModelIndex>
++#include <QPixmap>
++#include <QPointer>
++
++#include <boost/bind.hpp>
++#include <KMessageBox>
++#include <KPIMIdentities/IdentityManager>
++#include <KFileDialog>
++#include <KIO/NetAccess>
++
++using namespace CalendarSupport;
++using namespace KHolidays;
++
++KCalCore::Incidence::Ptr CalendarSupport::incidence( const Akonadi::Item &item )
++{
++  return
++    item.hasPayload<KCalCore::Incidence::Ptr>() ?
++    item.payload<KCalCore::Incidence::Ptr>() :
++    KCalCore::Incidence::Ptr();
++}
++
++KCalCore::Event::Ptr CalendarSupport::event( const Akonadi::Item &item )
++{
++  return
++    item.hasPayload<KCalCore::Event::Ptr>() ?
++    item.payload<KCalCore::Event::Ptr>() :
++    KCalCore::Event::Ptr();
++}
++
++KCalCore::Event::List CalendarSupport::eventsFromItems( const Akonadi::Item::List &items )
++{
++  KCalCore::Event::List events;
++  Q_FOREACH ( const Akonadi::Item &item, items ) {
++    if ( const KCalCore::Event::Ptr e = CalendarSupport::event( item ) ) {
++      events.push_back( e );
++    }
++  }
++  return events;
++}
++
++KCalCore::Incidence::List CalendarSupport::incidencesFromItems( const Akonadi::Item::List &items )
++{
++  KCalCore::Incidence::List incidences;
++  Q_FOREACH ( const Akonadi::Item &item, items ) {
++    if ( const KCalCore::Incidence::Ptr e = CalendarSupport::incidence( item ) ) {
++      incidences.push_back( e );
++    }
++  }
++  return incidences;
++}
++
++KCalCore::Todo::Ptr CalendarSupport::todo( const Akonadi::Item &item )
++{
++  return
++    item.hasPayload<KCalCore::Todo::Ptr>() ?
++    item.payload<KCalCore::Todo::Ptr>() :
++    KCalCore::Todo::Ptr();
++}
++
++KCalCore::Journal::Ptr CalendarSupport::journal( const Akonadi::Item &item )
++{
++  return
++    item.hasPayload<KCalCore::Journal::Ptr>() ?
++    item.payload<KCalCore::Journal::Ptr>() :
++    KCalCore::Journal::Ptr();
++}
++
++bool CalendarSupport::hasIncidence( const Akonadi::Item &item )
++{
++  return item.hasPayload<KCalCore::Incidence::Ptr>();
++}
++
++bool CalendarSupport::hasEvent( const Akonadi::Item &item )
++{
++  return item.hasPayload<KCalCore::Event::Ptr>();
++}
++
++bool CalendarSupport::hasTodo( const Akonadi::Item &item )
++{
++  return item.hasPayload<KCalCore::Todo::Ptr>();
++}
++
++bool CalendarSupport::hasJournal( const Akonadi::Item &item )
++{
++  return item.hasPayload<KCalCore::Journal::Ptr>();
++}
++
++QMimeData *CalendarSupport::createMimeData( const Akonadi::Item::List &items,
++                                            const KDateTime::Spec &timeSpec )
++{
++  if ( items.isEmpty() ) {
++    return 0;
++  }
++
++  KCalCore::MemoryCalendar::Ptr cal( new KCalCore::MemoryCalendar( timeSpec ) );
++
++  QList<QUrl> urls;
++  int incidencesFound = 0;
++  Q_FOREACH ( const Akonadi::Item &item, items ) {
++    const KCalCore::Incidence::Ptr incidence( CalendarSupport::incidence( item ) );
++    if ( !incidence ) {
++      continue;
++    }
++    ++incidencesFound;
++    urls.push_back( item.url() );
++    KCalCore::Incidence::Ptr i( incidence->clone() );
++    cal->addIncidence( i );
++  }
++
++  if ( incidencesFound == 0 ) {
++    return 0;
++  }
++
++  std::auto_ptr<QMimeData> mimeData( new QMimeData );
++
++  mimeData->setUrls( urls );
++
++  KCalUtils::ICalDrag::populateMimeData( mimeData.get(), cal );
++  KCalUtils::VCalDrag::populateMimeData( mimeData.get(), cal );
++
++  return mimeData.release();
++}
++
++QMimeData *CalendarSupport::createMimeData( const Akonadi::Item &item,
++                                            const KDateTime::Spec &timeSpec )
++{
++  return createMimeData( Akonadi::Item::List() << item, timeSpec );
++}
++
++#ifndef QT_NO_DRAGANDDROP
++QDrag *CalendarSupport::createDrag( const Akonadi::Item &item,
++                                    const KDateTime::Spec &timeSpec, QWidget *parent )
++{
++  return createDrag( Akonadi::Item::List() << item, timeSpec, parent );
++}
++#endif
++
++static QByteArray findMostCommonType( const Akonadi::Item::List &items )
++{
++  QByteArray prev;
++  if ( items.isEmpty() ) {
++    return "Incidence";
++  }
++
++  Q_FOREACH( const Akonadi::Item &item, items ) {
++    if ( !CalendarSupport::hasIncidence( item ) ) {
++      continue;
++    }
++    const QByteArray type = CalendarSupport::incidence( item )->typeStr();
++    if ( !prev.isEmpty() && type != prev ) {
++      return "Incidence";
++    }
++    prev = type;
++  }
++  return prev;
++}
++
++#ifndef QT_NO_DRAGANDDROP
++QDrag *CalendarSupport::createDrag( const Akonadi::Item::List &items,
++                                    const KDateTime::Spec &timeSpec, QWidget *parent )
++{
++  std::auto_ptr<QDrag> drag( new QDrag( parent ) );
++  drag->setMimeData( CalendarSupport::createMimeData( items, timeSpec ) );
++
++  const QByteArray common = findMostCommonType( items );
++  if ( common == "Event" ) {
++    drag->setPixmap( BarIcon( QLatin1String( "view-calendar-day" ) ) );
++  } else if ( common == "Todo" ) {
++    drag->setPixmap( BarIcon( QLatin1String( "view-calendar-tasks" ) ) );
++  }
++
++  return drag.release();
++}
++#endif
++
++static bool itemMatches( const Akonadi::Item &item, const KCalCore::CalFilter *filter )
++{
++  assert( filter );
++  KCalCore::Incidence::Ptr inc = CalendarSupport::incidence( item );
++  if ( !inc ) {
++    return false;
++  }
++  return filter->filterIncidence( inc );
++}
++
++Akonadi::Item::List CalendarSupport::applyCalFilter( const Akonadi::Item::List &items_,
++                                                     const KCalCore::CalFilter *filter )
++{
++  Q_ASSERT( filter );
++  Akonadi::Item::List items( items_ );
++  items.erase( std::remove_if( items.begin(), items.end(),
++                               !bind( itemMatches, _1, filter ) ), items.end() );
++  return items;
++}
++
++bool CalendarSupport::isValidIncidenceItemUrl( const KUrl &url,
++                                               const QStringList &supportedMimeTypes )
++{
++  if ( !url.isValid() ) {
++    return false;
++  }
++
++  if ( url.scheme() != QLatin1String( "akonadi" ) ) {
++    return false;
++  }
++
++  return supportedMimeTypes.contains( url.queryItem( QLatin1String( "type" ) ) );
++}
++
++bool CalendarSupport::isValidIncidenceItemUrl( const KUrl &url )
++{
++  return isValidIncidenceItemUrl( url,
++                                  QStringList() << KCalCore::Event::eventMimeType()
++                                                << KCalCore::Todo::todoMimeType()
++                                                << KCalCore::Journal::journalMimeType()
++                                                << KCalCore::FreeBusy::freeBusyMimeType() );
++}
++
++static bool containsValidIncidenceItemUrl( const QList<QUrl>& urls )
++{
++  return
++    std::find_if( urls.begin(), urls.end(),
++                  bind( CalendarSupport::isValidIncidenceItemUrl, _1 ) ) != urls.constEnd();
++}
++
++bool CalendarSupport::isValidTodoItemUrl( const KUrl &url )
++{
++  if ( !url.isValid() || url.scheme() != QLatin1String( "akonadi" ) ) {
++    return false;
++  }
++
++  return url.queryItem( QLatin1String( "type" ) ) == KCalCore::Todo::todoMimeType();
++}
++
++bool CalendarSupport::canDecode( const QMimeData *md )
++{
++  Q_ASSERT( md );
++  return
++    containsValidIncidenceItemUrl( md->urls() ) ||
++    KCalUtils::ICalDrag::canDecode( md ) ||
++    KCalUtils::VCalDrag::canDecode( md );
++}
++
++QList<KUrl> CalendarSupport::incidenceItemUrls( const QMimeData *mimeData )
++{
++  QList<KUrl> urls;
++  Q_FOREACH( const KUrl &i, mimeData->urls() ) {
++    if ( isValidIncidenceItemUrl( i ) ) {
++      urls.push_back( i );
++    }
++  }
++  return urls;
++}
++
++QList<KUrl> CalendarSupport::todoItemUrls( const QMimeData *mimeData )
++{
++  QList<KUrl> urls;
++
++  Q_FOREACH( const KUrl &i, mimeData->urls() ) {
++    if ( isValidIncidenceItemUrl( i, QStringList() << KCalCore::Todo::todoMimeType() ) ) {
++      urls.push_back( i );
++    }
++  }
++  return urls;
++}
++
++bool CalendarSupport::mimeDataHasTodo( const QMimeData *mimeData )
++{
++  return !todoItemUrls( mimeData ).isEmpty() || !todos( mimeData, KDateTime::Spec() ).isEmpty();
++}
++
++KCalCore::Todo::List CalendarSupport::todos( const QMimeData *mimeData,
++                                             const KDateTime::Spec &spec )
++{
++  KCalCore::Todo::List todos;
++
++#ifndef QT_NO_DRAGANDDROP
++  KCalCore::Calendar::Ptr cal( KCalUtils::DndFactory::createDropCalendar( mimeData, spec ) );
++  if ( cal ) {
++    Q_FOREACH( const KCalCore::Todo::Ptr &i, cal->todos() ) {
++      todos.push_back( KCalCore::Todo::Ptr( i->clone() ) );
++    }
++  }
++#endif
++
++  return todos;
++}
++
++Akonadi::Collection CalendarSupport::selectCollection( QWidget *parent,
++                                                       int &dialogCode,
++                                                       const QStringList &mimeTypes,
++                                                       const Akonadi::Collection &defCollection )
++{
++  QPointer<Akonadi::CollectionDialog> dlg( new Akonadi::CollectionDialog( parent ) );
++
++  kDebug() << "selecting collections with mimeType in " << mimeTypes;
++
++  dlg->setMimeTypeFilter( mimeTypes );
++  dlg->setAccessRightsFilter( Akonadi::Collection::CanCreateItem );
++  if ( defCollection.isValid() ) {
++    dlg->setDefaultCollection( defCollection );
++  }
++  Akonadi::Collection collection;
++
++  // FIXME: don't use exec.
++  dialogCode = dlg->exec();
++  if ( dialogCode == QDialog::Accepted ) {
++    collection = dlg->selectedCollection();
++
++    if ( !collection.isValid() ) {
++      kWarning() <<"An invalid collection was selected!";
++    }
++  }
++  delete dlg;
++
++  return collection;
++}
++
++Akonadi::Item CalendarSupport::itemFromIndex( const QModelIndex &idx )
++{
++  Akonadi::Item item = idx.data( Akonadi::EntityTreeModel::ItemRole ).value<Akonadi::Item>();
++  item.setParentCollection(
++    idx.data( Akonadi::EntityTreeModel::ParentCollectionRole ).value<Akonadi::Collection>() );
++  return item;
++}
++
++Akonadi::Collection::List CalendarSupport::collectionsFromModel( const QAbstractItemModel *model,
++                                                                 const QModelIndex &parentIndex,
++                                                                 int start, int end )
++{
++  const int endRow = end >= 0 ? end : model->rowCount( parentIndex ) - 1;
++  Akonadi::Collection::List collections;
++  int row = start;
++  QModelIndex i = model->index( row, 0, parentIndex );
++  while ( row <= endRow ) {
++    const Akonadi::Collection collection = collectionFromIndex( i );
++    if ( collection.isValid() ) {
++      collections << collection;
++      QModelIndex childIndex = i.child( 0, 0 );
++      if ( childIndex.isValid() ) {
++        collections << collectionsFromModel( model, i );
++      }
++    }
++    ++row;
++    i = i.sibling( row, 0 );
++  }
++  return collections;
++}
++
++Akonadi::Item::List CalendarSupport::itemsFromModel( const QAbstractItemModel * model,
++                                                     const QModelIndex &parentIndex,
++                                                     int start, int end )
++{
++  const int endRow = end >= 0 ? end : model->rowCount( parentIndex ) - 1;
++  Akonadi::Item::List items;
++  int row = start;
++  QModelIndex i = model->index( row, 0, parentIndex );
++  while ( row <= endRow ) {
++    const Akonadi::Item item = itemFromIndex( i );
++    if ( CalendarSupport::hasIncidence( item ) ) {
++      items << item;
++    } else {
++      QModelIndex childIndex = i.child( 0, 0 );
++      if ( childIndex.isValid() ) {
++        items << itemsFromModel( model, i );
++      }
++    }
++
++    ++row;
++    i = i.sibling( row, 0 );
++  }
++  return items;
++}
++
++Akonadi::Collection CalendarSupport::collectionFromIndex( const QModelIndex &index )
++{
++  return index.data( Akonadi::EntityTreeModel::CollectionRole ).value<Akonadi::Collection>();
++}
++
++Akonadi::Collection::Id CalendarSupport::collectionIdFromIndex( const QModelIndex &index )
++{
++  return index.data( Akonadi::EntityTreeModel::CollectionIdRole ).value<Akonadi::Collection::Id>();
++}
++
++Akonadi::Collection::List CalendarSupport::collectionsFromIndexes( const QModelIndexList &indexes )
++{
++  Akonadi::Collection::List l;
++  Q_FOREACH( const QModelIndex &idx, indexes ) {
++    l.push_back( collectionFromIndex( idx ) );
++  }
++  return l;
++}
++
++QString CalendarSupport::displayName( const Akonadi::Collection &c )
++{
++  const Akonadi::EntityDisplayAttribute *attr = c.attribute<Akonadi::EntityDisplayAttribute>();
++  return ( attr && !attr->displayName().isEmpty() ) ? attr->displayName() : c.name();
++}
++
++QString CalendarSupport::subMimeTypeForIncidence( const KCalCore::Incidence::Ptr &incidence )
++{
++  return incidence->mimeType();
++}
++
++QList<QDate> CalendarSupport::workDays( const QDate &startDate,
++                                        const QDate &endDate )
++{
++  QList<QDate> result;
++
++/*  const int mask( ~( KCalPrefs::instance()->mWorkWeekMask ) );
++  const int numDays = startDate.daysTo( endDate ) + 1;
++
++  for ( int i = 0; i < numDays; ++i ) {
++    const QDate date = startDate.addDays( i );
++    if ( !( mask & ( 1 << ( date.dayOfWeek() - 1 ) ) ) ) {
++      result.append( date );
++    }
++  }
++
++  if ( KCalPrefs::instance()->mExcludeHolidays ) {
++    // NOTE: KOGlobals, where this method comes from, used to hold a pointer to
++    //       a KHolidays object. I'm not sure about how expensive it is, just
++    //       creating one here.
++    const HolidayRegion holidays( KCalPrefs::instance()->mHolidays );
++    const Holiday::List list = holidays.holidays( startDate, endDate );
++    for ( int i = 0; i < list.count(); ++i ) {
++      const Holiday &h = list.at( i );
++      const QString dateString = h.date().toString();
++      if ( h.dayType() == Holiday::NonWorkday ) {
++        result.removeAll( h.date() );
++      }
++    }
++  }*/
++
++  return result;
++}
++
++QStringList CalendarSupport::holiday( const QDate &date )
++{
++  QStringList hdays;
++
++/*  const HolidayRegion holidays( KCalPrefs::instance()->mHolidays );
++  const Holiday::List list = holidays.holidays( date );
++
++  for ( int i = 0; i < list.count(); ++i ) {
++    hdays.append( list.at( i ).text() );
++  }*/
++  return hdays;
++}
++
++void CalendarSupport::sendAsICalendar(const Akonadi::Item& item, KPIMIdentities::IdentityManager* identityManager, QWidget* parentWidget)
++{
++/*  Incidence::Ptr incidence = CalendarSupport::incidence( item );
++
++  if ( !incidence ) {
++    KMessageBox::information(
++      parentWidget,
++      i18n( "No item selected." ),
++      i18n( "Forwarding" ),
++      "ForwardNoEventSelected" );
++    return;
++  }
++
++  QPointer<PublishDialog> publishdlg = new PublishDialog;
++  if ( publishdlg->exec() == QDialog::Accepted ) {
++    const QString recipients = publishdlg->addresses();
++    if ( incidence->organizer()->isEmpty() ) {
++      incidence->setOrganizer( Person::Ptr( new Person( CalendarSupport::KCalPrefs::instance()->fullName(),
++                                                        CalendarSupport::KCalPrefs::instance()->email() ) ) );
++    }
++
++    ICalFormat format;
++    const QString from = CalendarSupport::KCalPrefs::instance()->email();
++    const bool bccMe = CalendarSupport::KCalPrefs::instance()->mBcc;
++    const QString messageText = format.createScheduleMessage( incidence, iTIPRequest );
++    CalendarSupport::MailClient mailer;
++    if ( mailer.mailTo(
++           incidence,
++           identityManager->identityForAddress( from ),
++           from, bccMe, recipients, messageText, MailTransport::TransportManager::self()->defaultTransportName() ) ) {
++      KMessageBox::information(
++        parentWidget,
++        i18n( "The item information was successfully sent." ),
++        i18n( "Forwarding" ),
++        "IncidenceForwardSuccess" );
++    } else {
++      KMessageBox::error(
++        parentWidget,
++        i18n( "Unable to forward the item '%1'", incidence->summary() ),
++        i18n( "Forwarding Error" ) );
++    }
++  }
++  delete publishdlg;*/
++}
++
++void  CalendarSupport::publishItemInformation(const Akonadi::Item& item, Calendar* calendar, QWidget* parentWidget)
++{
++/*  Incidence::Ptr incidence = CalendarSupport::incidence( item );
++
++  if ( !incidence ) {
++    KMessageBox::information(
++      parentWidget,
++      i18n( "No item selected." ),
++      "PublishNoEventSelected" );
++    return;
++  }
++
++  QPointer<PublishDialog> publishdlg = new PublishDialog();
++  if ( incidence->attendeeCount() > 0 ) {
++    Attendee::List attendees = incidence->attendees();
++    Attendee::List::ConstIterator it;
++    for ( it = attendees.constBegin(); it != attendees.constEnd(); ++it ) {
++      publishdlg->addAttendee( *it );
++    }
++  }
++  if ( publishdlg->exec() == QDialog::Accepted ) {
++    Incidence::Ptr inc( incidence->clone() );
++    inc->registerObserver( 0 );
++    inc->clearAttendees();
++
++    // Send the mail
++    CalendarSupport::MailScheduler scheduler( calendar );
++    if ( scheduler.publish( incidence, publishdlg->addresses() ) ) {
++      KMessageBox::information(
++        parentWidget,
++        i18n( "The item information was successfully sent." ),
++        i18n( "Publishing" ),
++        "IncidencePublishSuccess" );
++    } else {
++      KMessageBox::error(
++        parentWidget,
++        i18n( "Unable to publish the item '%1'", incidence->summary() ) );
++    }
++  }
++  delete publishdlg;*/
++}
++
++void CalendarSupport::scheduleiTIPMethods( KCalCore::iTIPMethod method, const Akonadi::Item& item, CalendarSupport::Calendar* calendar, QWidget* parentWidget )
++{
++/*  Incidence::Ptr incidence = CalendarSupport::incidence( item );
++
++  if ( !incidence ) {
++    KMessageBox::sorry(
++      parentWidget,
++      i18n( "No item selected." ),
++      "ScheduleNoEventSelected" );
++    return;
++  }
++
++  if ( incidence->attendeeCount() == 0 && method != iTIPPublish ) {
++    KMessageBox::information(
++      parentWidget,
++      i18n( "The item has no attendees." ),
++      "ScheduleNoIncidences" );
++    return;
++  }
++
++  Incidence *inc = incidence->clone();
++  inc->registerObserver( 0 );
++  inc->clearAttendees();
++
++  // Send the mail
++  CalendarSupport::MailScheduler scheduler( calendar );
++  if ( scheduler.performTransaction( incidence, method ) ) {
++    KMessageBox::information(
++      parentWidget,
++      i18n( "The groupware message for item '%1' "
++            "was successfully sent.\nMethod: %2",
++            incidence->summary(),
++            ScheduleMessage::methodName( method ) ),
++      i18n( "Sending Free/Busy" ),
++      "FreeBusyPublishSuccess" );
++  } else {
++    KMessageBox::error(
++      parentWidget,
++      i18nc( "Groupware message sending failed. "
++             "%2 is request/reply/add/cancel/counter/etc.",
++             "Unable to send the item '%1'.\nMethod: %2",
++             incidence->summary(),
++             ScheduleMessage::methodName( method ) ) );
++  }*/
++}
++
++void CalendarSupport::saveAttachments(const Akonadi::Item& item, QWidget* parentWidget)
++{
++/*  Incidence::Ptr incidence = CalendarSupport::incidence( item );
++
++  if ( !incidence ) {
++    KMessageBox::sorry(
++      parentWidget,
++      i18n( "No item selected." ),
++      "SaveAttachments" );
++    return;
++  }
++
++  Attachment::List attachments = incidence->attachments();
++
++  if ( attachments.empty() )
++    return;
++
++  QString targetFile, targetDir;
++  if ( attachments.count() > 1 ) {
++    // get the dir
++    targetDir = KFileDialog::getExistingDirectory( KUrl( "kfiledialog:///saveAttachment" ),
++                                                   parentWidget,
++                                                   i18n( "Save Attachments To" ) );
++    if ( targetDir.isEmpty() ) {
++      return;
++    }
++
++    // we may not get a slash-terminated url out of KFileDialog
++    if ( !targetDir.endsWith('/') )
++      targetDir.append('/');
++  }
++  else {
++    // only one item, get the desired filename
++    QString fileName = attachments.first()->label();
++    if ( fileName.isEmpty() ) {
++      fileName = i18nc( "filename for an unnamed attachment", "attachment.1" );
++    }
++    targetFile = KFileDialog::getSaveFileName( KUrl( "kfiledialog:///saveAttachment/" + fileName ),
++                                   QString(),
++                                   parentWidget,
++                                   i18n( "Save Attachment" ) );
++    if ( targetFile.isEmpty() ) {
++      return;
++    }
++
++    targetDir = QFileInfo( targetFile ).absolutePath() + "/";
++  }
++
++  Q_FOREACH( Attachment::Ptr attachment, attachments ) {
++    targetFile = targetDir + attachment->label();
++    KUrl sourceUrl;
++    if ( attachment->isUri() ) {
++      sourceUrl = attachment->uri();
++    } else {
++      sourceUrl = incidence->writeAttachmentToTempFile( attachment );
++    }
++    // save the attachment url
++    if ( !KIO::NetAccess::file_copy( sourceUrl, KUrl( targetFile ) ) &&
++        KIO::NetAccess::lastError() ) {
++      KMessageBox::error( parentWidget, KIO::NetAccess::lastErrorString() );
++    }
++  }*/
++
++}
+diff --git a/plasma/generic/dataengines/calendar/akonadi/utils.h b/plasma/generic/dataengines/calendar/akonadi/utils.h
+new file mode 100644
+index 0000000..d923594
+--- /dev/null
++++ b/plasma/generic/dataengines/calendar/akonadi/utils.h
+@@ -0,0 +1,250 @@
++/*
++  Copyright (c) 2009, 2010 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com
++  Copyright (C) 2009 KDAB (author: Frank Osterfeld <osterfeld@kde.org>)
++  Copyright (c) 2010 Andras Mantia <andras@kdab.com>
++
++  This program is free software; you can redistribute it and/or modify
++  it under the terms of the GNU General Public License as published by
++  the Free Software Foundation; either version 2 of the License, or
++  (at your option) any later version.
++
++  This program is distributed in the hope that it will be useful,
++  but WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++  GNU General Public License for more details.
++
++  You should have received a copy of the GNU General Public License along
++  with this program; if not, write to the Free Software Foundation, Inc.,
++  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++
++  As a special exception, permission is given to link this program
++  with any edition of Qt, and distribute the resulting executable,
++  without including the source code for Qt in the source distribution.
++*/
++#ifndef CALENDARSUPPORT_UTILS_H
++#define CALENDARSUPPORT_UTILS_H
++
++#include <Akonadi/Collection>
++#include <Akonadi/Item>
++
++#include <KCalCore/Event>
++#include <KCalCore/Incidence>
++#include <KCalCore/Journal>
++#include <KCalCore/ScheduleMessage>
++#include <KCalCore/Todo>
++
++#include <KDateTime>
++
++#include <QModelIndex>
++
++namespace KPIMIdentities {
++class IdentityManager;
++}
++
++namespace KCalCore {
++  class CalFilter;
++}
++
++class QAbstractItemModel;
++class QDrag;
++class QMimeData;
++
++typedef QList<QModelIndex> QModelIndexList;
++
++namespace CalendarSupport
++{
++
++class Calendar;
++
++  /**
++   * returns the incidence from an akonadi item, or a null pointer if the item has no such payload
++   */
++  KCalCore::Incidence::Ptr incidence( const Akonadi::Item &item );
++
++  /**
++   * returns the event from an akonadi item, or a null pointer if the item has no such payload
++   */
++  KCalCore::Event::Ptr event( const Akonadi::Item &item );
++
++  /**
++   * returns event pointers from an akonadi item, or a null pointer if the item has no such payload
++   */
++  KCalCore::Event::List eventsFromItems(
++    const Akonadi::Item::List &items );
++
++  /**
++   * returns incidence pointers from an akonadi item.
++   */
++  KCalCore::Incidence::List incidencesFromItems(
++    const Akonadi::Item::List &items );
++
++
++  /**
++  * returns the todo from an akonadi item, or a null pointer if the item has no such payload
++  */
++  KCalCore::Todo::Ptr todo( const Akonadi::Item &item );
++
++  /**
++  * returns the journal from an akonadi item, or a null pointer if the item has no such payload
++  */
++  KCalCore::Journal::Ptr journal( const Akonadi::Item &item );
++
++  /**
++   * returns whether an Akonadi item contains an incidence
++   */
++  bool hasIncidence( const Akonadi::Item &item );
++
++  /**
++   * returns whether an Akonadi item contains an event
++   */
++  bool hasEvent( const Akonadi::Item &item );
++
++  /**
++   * returns whether an Akonadi item contains a todo
++   */
++  bool hasTodo( const Akonadi::Item &item );
++
++  /**
++   * returns whether an Akonadi item contains a journal
++   */
++  bool hasJournal( const Akonadi::Item &item );
++
++  /**
++   * returns whether this item can be deleted
++   */
++  bool hasDeleteRights( const Akonadi::Item &item );
++
++  /**
++   * returns whether this item can be changed
++   */
++  bool hasChangeRights( const Akonadi::Item &item );
++
++  /**
++  * returns @p true if the URL represents an Akonadi item and has one of the given mimetypes.
++  */
++  bool isValidIncidenceItemUrl( const KUrl &url,
++                                                       const QStringList &supportedMimeTypes );
++
++  bool isValidIncidenceItemUrl( const KUrl &url );
++
++  /**
++  * returns @p true if the mime data object contains any of the following:
++  *
++  * * An akonadi item with a supported KCal mimetype
++  * * an iCalendar
++  * * a VCard
++  */
++  bool canDecode( const QMimeData *mimeData );
++
++  QList<KUrl> incidenceItemUrls( const QMimeData *mimeData );
++
++  QList<KUrl> todoItemUrls( const QMimeData *mimeData );
++
++  bool mimeDataHasTodo( const QMimeData *mimeData );
++
++  KCalCore::Todo::List todos( const QMimeData *mimeData,
++                                                     const KDateTime::Spec &timeSpec );
++
++  /**
++  * returns @p true if the URL represents an Akonadi item and has one of the given mimetypes.
++  */
++  bool isValidTodoItemUrl( const KUrl &url );
++
++  /**
++  * creates mime data object for dragging an akonadi item containing an incidence
++  */
++  QMimeData *createMimeData( const Akonadi::Item &item,
++                                                    const KDateTime::Spec &timeSpec );
++
++  /**
++  * creates mime data object for dragging akonadi items containing an incidence
++  */
++  QMimeData *createMimeData( const Akonadi::Item::List &items,
++                                                    const KDateTime::Spec &timeSpec );
++
++#ifndef QT_NO_DRAGANDDROP
++  /**
++  * creates a drag object for dragging an akonadi item containing an incidence
++  */
++  QDrag *createDrag( const Akonadi::Item &item,
++                                            const KDateTime::Spec &timeSpec, QWidget *parent );
++
++  /**
++  * creates a drag object for dragging akonadi items containing an incidence
++  */
++  QDrag *createDrag( const Akonadi::Item::List &items,
++                                            const KDateTime::Spec &timeSpec, QWidget *parent );
++#endif
++  /**
++    Applies a filter to a list of items containing incidences.
++    Items not containing incidences or not matching the filter are removed.
++    Helper method anologous to KCalCore::CalFilter::apply()
++    @see KCalCore::CalFilter::apply()
++    @param items the list of items to filter
++    @param filter the filter to apply to the list of items
++    @return the filtered list of items
++  */
++  Akonadi::Item::List applyCalFilter( const Akonadi::Item::List &items,
++                                                             const KCalCore::CalFilter *filter );
++
++  /**
++    Shows a modal dialog that allows to select a collection.
++
++    @param will contain the dialogCode, QDialog::Accepted if the user pressed Ok,
++    QDialog::Rejected otherwise
++    @param parent The optional parent of the modal dialog.
++    @return The select collection or an invalid collection if
++    there was no collection selected.
++  */
++  Akonadi::Collection selectCollection(
++    QWidget *parent, int &dialogCode,
++    const QStringList &mimeTypes,
++    const Akonadi::Collection &defaultCollection = Akonadi::Collection() );
++
++  Akonadi::Item itemFromIndex( const QModelIndex &index );
++
++  Akonadi::Item::List itemsFromModel(
++    const QAbstractItemModel *model,
++    const QModelIndex &parentIndex = QModelIndex(),
++    int start = 0,
++    int end = -1 );
++
++  Akonadi::Collection::List collectionsFromModel(
++    const QAbstractItemModel *model,
++    const QModelIndex &parentIndex = QModelIndex(),
++    int start = 0,
++    int end = -1 );
++
++  Akonadi::Collection collectionFromIndex( const QModelIndex &index );
++
++  Akonadi::Collection::Id collectionIdFromIndex( const QModelIndex &index );
++
++  Akonadi::Collection::List collectionsFromIndexes(
++    const QModelIndexList &indexes );
++
++  QString displayName( const Akonadi::Collection &coll );
++
++  QString subMimeTypeForIncidence(
++    const KCalCore::Incidence::Ptr &incidence );
++
++  /**
++      Returns a list containing work days between @p start and @end.
++  */
++  QList<QDate> workDays( const QDate &start, const QDate &end );
++
++  /**
++    Returns a list of holidays that occur at @param date.
++  */
++  QStringList holiday( const QDate &date );
++
++  void sendAsICalendar( const Akonadi::Item& item, KPIMIdentities::IdentityManager *identityManager, QWidget* parentWidget = 0 );
++
++  void publishItemInformation( const Akonadi::Item& item, Calendar* calendar, QWidget* parentWidget = 0 );
++
++  void scheduleiTIPMethods( KCalCore::iTIPMethod method, const Akonadi::Item &item, Calendar* calendar, QWidget *parentWidget = 0 );
++
++  void saveAttachments( const Akonadi::Item& item, QWidget* parentWidget = 0 );
++
++}
++
++#endif
+diff --git a/plasma/generic/dataengines/calendar/calendarengine.cpp b/plasma/generic/dataengines/calendar/calendarengine.cpp
+index 5b98d8a..7235f74 100644
+--- a/plasma/generic/dataengines/calendar/calendarengine.cpp
++++ b/plasma/generic/dataengines/calendar/calendarengine.cpp
+@@ -31,13 +31,24 @@
+ #include <KCalCore/Event>
+ #include <KCalCore/Todo>
+ #include <KCalCore/Journal>
++#include <kdescendantsproxymodel.h>
+ 
+ #ifdef AKONADI_FOUND
++#include <Akonadi/ChangeRecorder>
++#include <Akonadi/Session>
++#include <Akonadi/Collection>
++#include <Akonadi/ItemFetchScope>
++#include <Akonadi/EntityDisplayAttribute>
++#include <Akonadi/EntityMimeTypeFilterModel>
++
++#include "akonadi/calendar.h"
++#include "akonadi/calendarmodel.h"
+ #include "eventdatacontainer.h"
+ #endif
+ 
+ CalendarEngine::CalendarEngine(QObject* parent, const QVariantList& args)
+-              : Plasma::DataEngine(parent)
++              : Plasma::DataEngine(parent),
++                m_calendar(0)
+ {
+     Q_UNUSED(args);
+ }
+@@ -299,16 +310,46 @@ bool CalendarEngine::akonadiCalendarSourceRequest(const QString& key, const QStr
+         return false;
+     }
+ 
+-    if (!m_calendar) {
+-        m_calendar = Akonadi::ETMCalendar::Ptr(new Akonadi::ETMCalendar());
+-        m_calendar->setCollectionFilteringEnabled(false);
+-    }
++    // start akonadi etc if needed
++    initAkonadiCalendar();
+ 
+     // create the corresponding EventDataContainer
+     addSource(new EventDataContainer(m_calendar, request, KDateTime(start, QTime(0, 0, 0)), KDateTime(end, QTime(23, 59, 59))));
+     return true;
+ }
+ 
+-#endif // AKONADI_FOUND
++void CalendarEngine::initAkonadiCalendar()
++{
++    if (m_calendar != 0) {
++        // we have been initialized already
++        return;
++    }
++
++    // ask for akonadi events
++    Akonadi::Session *session = new Akonadi::Session("PlasmaCalendarEngine", this);
++    Akonadi::ChangeRecorder* monitor = new Akonadi::ChangeRecorder(this);
++    Akonadi::ItemFetchScope scope;
++    scope.fetchFullPayload(true);
++    scope.fetchAttribute<Akonadi::EntityDisplayAttribute>();
++
++    // setup what part of akonadi data we want (calendar incidences)
++    monitor->setSession(session);
++    monitor->setCollectionMonitored(Akonadi::Collection::root());
++    monitor->fetchCollection(true);
++    monitor->setItemFetchScope(scope);
++    monitor->setMimeTypeMonitored(KCalCore::Event::eventMimeType(), true);
++    monitor->setMimeTypeMonitored(KCalCore::Todo::todoMimeType(), true);
++    monitor->setMimeTypeMonitored(KCalCore::Journal::journalMimeType(), true);
++
++    // create the models that contain the data. they will be updated automatically from akonadi.
++    CalendarSupport::CalendarModel *calendarModel = new CalendarSupport::CalendarModel(monitor, this);
++    KDescendantsProxyModel *flatModel = new KDescendantsProxyModel(this);
++    flatModel->setSourceModel(calendarModel);
++    Akonadi::EntityMimeTypeFilterModel *mimeFilteredModel = new Akonadi::EntityMimeTypeFilterModel(this);
++    mimeFilteredModel->addMimeTypeExclusionFilter(Akonadi::Collection::mimeType());
++    mimeFilteredModel->setSourceModel(flatModel);
++    m_calendar = new CalendarSupport::Calendar(mimeFilteredModel, mimeFilteredModel, KSystemTimeZones::local());
++}
++#endif
+ 
+ #include "calendarengine.moc"
+diff --git a/plasma/generic/dataengines/calendar/calendarengine.h b/plasma/generic/dataengines/calendar/calendarengine.h
+index 21ad533..18ae774 100644
+--- a/plasma/generic/dataengines/calendar/calendarengine.h
++++ b/plasma/generic/dataengines/calendar/calendarengine.h
+@@ -24,9 +24,9 @@
+ 
+ #include <Plasma/DataEngine>
+ 
+-#ifdef AKONADI_FOUND
+-# include <Akonadi/Calendar/ETMCalendar>
+-#endif
++namespace CalendarSupport {
++    class Calendar;
++}
+ 
+ namespace KHolidays
+ {
+@@ -163,10 +163,11 @@ class CalendarEngine : public Plasma::DataEngine
+         /// creates EventDataContainers as needed
+         bool akonadiCalendarSourceRequest(const QString& key, const QStringList& args, const QString& request);
+ 
+-#ifdef AKONADI_FOUND
++        /// this will start akonadi if necessary and init m_calendarModel
++        void initAkonadiCalendar();
++
+         /// this is the representation of the root calendar itself. it contains everything (calendars, incidences)
+-        Akonadi::ETMCalendar::Ptr m_calendar;
+-#endif
++        CalendarSupport::Calendar *m_calendar;
+ 
+         /// holiday calendar
+         QHash<QString, KHolidays::HolidayRegion *> m_regions;
+diff --git a/plasma/generic/dataengines/calendar/eventdatacontainer.cpp b/plasma/generic/dataengines/calendar/eventdatacontainer.cpp
+index 27a1d58..63db4df 100644
+--- a/plasma/generic/dataengines/calendar/eventdatacontainer.cpp
++++ b/plasma/generic/dataengines/calendar/eventdatacontainer.cpp
+@@ -21,14 +21,19 @@
+ 
+ #include <KSystemTimeZones>
+ 
++#include <KCalCore/Calendar>
+ #include <KCalCore/Event>
+ #include <KCalCore/Todo>
+ #include <KCalCore/Journal>
+ #include <KCalUtils/Stringify>
+ 
++#include "akonadi/calendar.h"
++#include "akonadi/calendarmodel.h"
++
+ using namespace Akonadi;
++using namespace CalendarSupport;
+ 
+-EventDataContainer::EventDataContainer(const Akonadi::ETMCalendar::Ptr &calendar, const QString& name, const KDateTime& start, const KDateTime& end, QObject* parent)
++EventDataContainer::EventDataContainer(CalendarSupport::Calendar* calendar, const QString& name, const KDateTime& start, const KDateTime& end, QObject* parent)
+                   : Plasma::DataContainer(parent),
+                     m_calendar(calendar),
+                     m_name(name),
+@@ -39,7 +44,7 @@ EventDataContainer::EventDataContainer(const Akonadi::ETMCalendar::Ptr &calendar
+     setObjectName(name);
+ 
+     // Connect directly to the calendar for now
+-    connect(calendar.data(), SIGNAL(calendarChanged()), this, SLOT(updateData()));
++    connect(calendar, SIGNAL(calendarChanged()), this, SLOT(updateData()));
+ 
+     // create the initial data
+     updateData();
+@@ -56,10 +61,14 @@ void EventDataContainer::updateData()
+ 
+ void EventDataContainer::updateEventData()
+ {
+-    KCalCore::Event::List events = m_calendar->events(m_startDate.date(), m_endDate.date(), m_calendar->timeSpec());
++    Akonadi::Item::List events = m_calendar->events(m_startDate.date(), m_endDate.date(), m_calendar->timeSpec());
++
++    foreach (const Akonadi::Item &item, events) {
++        Q_ASSERT(item.hasPayload<KCalCore::Event::Ptr>());
++        const KCalCore::Event::Ptr event = item.payload<KCalCore::Event::Ptr>();
+ 
+-    foreach (const KCalCore::Event::Ptr &event, events) {
+         Plasma::DataEngine::Data eventData;
++
+         populateIncidenceData(event, eventData);
+ 
+         // Event specific fields
+@@ -81,10 +90,14 @@ void EventDataContainer::updateTodoData()
+ {
+     QDate todoDate = m_startDate.date();
+     while(todoDate <= m_endDate.date()) {
+-        KCalCore::Todo::List todos = m_calendar->todos(todoDate);
++        Akonadi::Item::List todos = m_calendar->todos(todoDate);
++
++        foreach (const Akonadi::Item &item, todos) {
++            Q_ASSERT(item.hasPayload<KCalCore::Todo::Ptr>());
++            const KCalCore::Todo::Ptr todo = item.payload<KCalCore::Todo::Ptr>();
+ 
+-        foreach (const KCalCore::Todo::Ptr &todo, todos) {
+             Plasma::DataEngine::Data todoData;
++
+             populateIncidenceData(todo, todoData);
+ 
+             QVariant var;
+@@ -113,13 +126,18 @@ void EventDataContainer::updateJournalData()
+ {
+     QDate journalDate = m_startDate.date();
+     while(journalDate <= m_endDate.date()) {
+-        KCalCore::Journal::List journals = m_calendar->journals(journalDate);
++        Akonadi::Item::List journals = m_calendar->journals(journalDate);
++
++        foreach (const Akonadi::Item &item, journals) {
++            Q_ASSERT(item.hasPayload<KCalCore::Journal::Ptr>());
++            const KCalCore::Journal::Ptr journal = item.payload<KCalCore::Journal::Ptr>();
+ 
+-        foreach (const KCalCore::Journal::Ptr &journal, journals) {
+             Plasma::DataEngine::Data journalData;
++
+             populateIncidenceData(journal, journalData);
+ 
+             // No Journal specific fields
++
+             setData(journal->uid(), journalData);
+         }
+ 
+@@ -127,7 +145,7 @@ void EventDataContainer::updateJournalData()
+     }
+ }
+ 
+-void EventDataContainer::populateIncidenceData(const KCalCore::Incidence::Ptr &incidence, Plasma::DataEngine::Data &incidenceData)
++void EventDataContainer::populateIncidenceData(KCalCore::Incidence::Ptr incidence, Plasma::DataEngine::Data &incidenceData)
+ {
+     QVariant var;
+     incidenceData["UID"] = incidence->uid();
+diff --git a/plasma/generic/dataengines/calendar/eventdatacontainer.h b/plasma/generic/dataengines/calendar/eventdatacontainer.h
+index fd3996f..b170a14 100644
+--- a/plasma/generic/dataengines/calendar/eventdatacontainer.h
++++ b/plasma/generic/dataengines/calendar/eventdatacontainer.h
+@@ -21,15 +21,20 @@
+ #define EVENTDATACONTAINER_H
+ 
+ #include <KDateTime>
+-#include <Akonadi/Calendar/ETMCalendar>
++
+ #include <KCalCore/Incidence>
++
+ #include <plasma/datacontainer.h>
+ 
+-class EventDataContainer : public Plasma::DataContainer
++namespace CalendarSupport {
++    class Calendar;
++}
++
++class EventDataContainer :public Plasma::DataContainer
+ {
+     Q_OBJECT
+ public:
+-    EventDataContainer(const Akonadi::ETMCalendar::Ptr &calendar, const QString& name, const KDateTime& start, const KDateTime& end, QObject* parent = 0);
++    EventDataContainer(CalendarSupport::Calendar* calendar, const QString& name, const KDateTime& start, const KDateTime& end, QObject* parent = 0);
+ 
+ public Q_SLOTS:
+     // update the list of incidents
+@@ -39,9 +44,9 @@ private:
+     void updateEventData();
+     void updateTodoData();
+     void updateJournalData();
+-    void populateIncidenceData(const KCalCore::Incidence::Ptr &incidence, Plasma::DataEngine::Data &incidenceData);
++    void populateIncidenceData(KCalCore::Incidence::Ptr incidence, Plasma::DataEngine::Data &incidenceData);
+ 
+-    Akonadi::ETMCalendar::Ptr m_calendar;
++    CalendarSupport::Calendar *m_calendar;
+     QString m_name;
+     KDateTime m_startDate;
+     KDateTime m_endDate;

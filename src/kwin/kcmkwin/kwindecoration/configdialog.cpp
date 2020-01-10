@@ -2,7 +2,7 @@
  KWin - the KDE window manager
  This file is part of the KDE project.
 
-Copyright (C) 2009 Martin Gräßlin <kde@martin-graesslin.com>
+Copyright (C) 2009 Martin Gräßlin <mgraesslin@kde.org>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -35,13 +35,27 @@ static const char* const border_names[ KDecorationDefines::BordersCount ] = {
     I18N_NOOP2("@item:inlistbox Border size:", "Very Large"),
     I18N_NOOP2("@item:inlistbox Border size:", "Huge"),
     I18N_NOOP2("@item:inlistbox Border size:", "Very Huge"),
-    I18N_NOOP2("@item:inlistbox Border size:", "Oversized")
+    I18N_NOOP2("@item:inlistbox Border size:", "Oversized"),
+    I18N_NOOP2("@item:inlistbox Border size:", "No Side Border"),
+    I18N_NOOP2("@item:inlistbox Border size:", "No Border"),
 };
 
 KWinAuroraeConfigForm::KWinAuroraeConfigForm(QWidget* parent)
     : QWidget(parent)
 {
     setupUi(this);
+    connect(borderSizesCombo, SIGNAL(currentIndexChanged(int)), SIGNAL(changed()));
+    connect(buttonSizesCombo, SIGNAL(currentIndexChanged(int)), SIGNAL(changed()));
+    connect(closeWindowsDoubleClick, SIGNAL(clicked()), SIGNAL(changed()));
+}
+
+void KWinAuroraeConfigForm::enableNoSideBorderSupport(bool enable)
+{
+    if (!enable) {
+        return;
+    }
+    borderSizesCombo->addItem(i18nc("@item:inlistbox Border size:", border_names[KDecorationDefines::BorderNoSides]));
+    borderSizesCombo->addItem(i18nc("@item:inlistbox Border size:", border_names[KDecorationDefines::BorderNone]));
 }
 
 KWinDecorationConfigForm::KWinDecorationConfigForm(QWidget* parent)

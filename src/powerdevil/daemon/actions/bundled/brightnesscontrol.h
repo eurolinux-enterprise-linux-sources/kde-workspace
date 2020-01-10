@@ -22,6 +22,7 @@
 #define POWERDEVIL_BUNDLEDACTIONS_BRIGHTNESSCONTROL_H
 
 #include <powerdevilaction.h>
+#include <powerdevilbackendinterface.h>
 
 class BrightnessOSDWidget;
 
@@ -32,6 +33,7 @@ class BrightnessControl : public PowerDevil::Action
 {
     Q_OBJECT
     Q_DISABLE_COPY(BrightnessControl)
+    Q_CLASSINFO("D-Bus Interface", "org.kde.Solid.PowerManagement.Actions.BrightnessControl")
 
 public:
     explicit BrightnessControl(QObject* parent);
@@ -43,13 +45,25 @@ protected:
     virtual void onIdleTimeout(int msec);
     virtual void onProfileLoad();
     virtual void triggerImpl(const QVariantMap& args);
+    virtual bool isSupported();
 
 public:
     virtual bool loadAction(const KConfigGroup& config);
 
 public Q_SLOTS:
     void showBrightnessOSD(int brightness);
-    void onBrightnessChangedFromBackend(float brightness);
+
+    // DBus export
+    void increaseBrightness();
+    void decreaseBrightness();
+    int brightness() const;
+    void setBrightness(int percent);
+
+private Q_SLOTS:
+    void onBrightnessChangedFromBackend(float brightness, PowerDevil::BackendInterface::BrightnessControlType type);
+
+Q_SIGNALS:
+    void brightnessChanged(int percent);
 
 private:
     int m_defaultValue;

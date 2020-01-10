@@ -30,11 +30,9 @@ DEALINGS IN THE SOFTWARE.
 #include <QMenu>
 #include <kglobal.h>
 #include <assert.h>
-#if defined Q_WS_X11 && ! defined K_WS_QTONLY
 #include <X11/Xlib.h>
 #include <fixx11h.h>
 #include <QX11Info>
-#endif
 
 #include "kdecorationfactory.h"
 #include "kdecorationbridge.h"
@@ -136,6 +134,11 @@ bool KDecoration::isMaximizable() const
 KDecoration::MaximizeMode KDecoration::maximizeMode() const
 {
     return bridge_->maximizeMode();
+}
+
+KDecoration::QuickTileMode KDecoration::quickTileMode() const
+{
+    return bridge_->quickTileMode();
 }
 
 bool KDecoration::isMinimizable() const
@@ -431,7 +434,6 @@ bool KDecoration::isAlphaEnabled() const
 KDecorationUnstable::KDecorationUnstable(KDecorationBridge* bridge, KDecorationFactory* factory)
     : KDecoration(bridge, factory)
 {
-    Q_ASSERT(dynamic_cast< KDecorationBridgeUnstable* >(bridge));
 }
 
 KDecorationUnstable::~KDecorationUnstable()
@@ -520,6 +522,11 @@ KDecoration::WindowOperation KDecorationUnstable::buttonToWindowOperation(Qt::Mo
 QRegion KDecoration::region(KDecorationDefines::Region)
 {
     return QRegion();
+}
+
+KDecorationDefines::Position KDecoration::titlebarPosition()
+{
+    return PositionTop;
 }
 
 QString KDecorationDefines::tabDragMimeType()
@@ -614,7 +621,8 @@ KDecorationOptions::BorderSize KDecorationOptions::preferredBorderSize(KDecorati
 
 bool KDecorationOptions::moveResizeMaximizedWindows() const
 {
-    return d->move_resize_maximized_windows;
+    // TODO KF5: remove function with API break
+    return false;
 }
 
 KDecorationDefines::WindowOperation KDecorationOptions::operationMaxButtonClick(Qt::MouseButtons button) const
@@ -658,6 +666,15 @@ void KDecorationOptions::setTitleButtonsLeft(const QString& b)
 void KDecorationOptions::setTitleButtonsRight(const QString& b)
 {
     d->title_buttons_right = b;
+}
+
+extern "C" {
+
+int decoration_bridge_version()
+{
+    return KWIN_DECORATION_BRIDGE_API_VERSION;
+}
+
 }
 
 #include "kdecoration.moc"

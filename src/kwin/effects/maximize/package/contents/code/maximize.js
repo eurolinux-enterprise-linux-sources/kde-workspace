@@ -31,6 +31,10 @@ var maximizeEffect = {
         var oldGeometry, newGeometry;
         oldGeometry = window.oldGeometry;
         newGeometry = window.geometry;
+        if (oldGeometry.width == newGeometry.width && oldGeometry.height == newGeometry.height)
+            oldGeometry = window.olderGeometry;
+        window.olderGeometry = window.oldGeometry;
+        window.oldGeometry = newGeometry;
         animate({
             window: window,
             duration: maximizeEffect.duration,
@@ -54,12 +58,17 @@ var maximizeEffect = {
                     value1: oldGeometry.x - newGeometry.x - (newGeometry.width / 2 - oldGeometry.width / 2),
                     value2: oldGeometry.y - newGeometry.y - (newGeometry.height / 2 - oldGeometry.height / 2)
                 }
+            }, {
+                type: Effect.CrossFadePrevious,
+                to: 1.0,
+                from: 0.0
             }]
         });
     },
     geometryChange: function (window, oldGeometry) {
         "use strict";
-        window.oldGeometry = oldGeometry;
+        window.oldGeometry = window.geometry;
+        window.olderGeometry = oldGeometry;
     },
     init: function () {
         "use strict";

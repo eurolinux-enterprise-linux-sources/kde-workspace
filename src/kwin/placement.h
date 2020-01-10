@@ -22,22 +22,24 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #ifndef KWIN_PLACEMENT_H
 #define KWIN_PLACEMENT_H
-
+// KWin
+#include <kwinglobals.h>
+// Qt
 #include <QPoint>
 #include <QRect>
 #include <QList>
 
+class QObject;
+
 namespace KWin
 {
 
-class Workspace;
 class Client;
 
 class Placement
 {
 public:
-
-    Placement(Workspace* w);
+    virtual ~Placement();
 
     /**
      * Placement policies. How workspace decides the way windows get positioned
@@ -72,17 +74,23 @@ public:
 
     void reinitCascading(int desktop);
 
+    /**
+     * Cascades all clients on the current desktop
+     **/
+    void cascadeDesktop();
+    /**
+     *   Unclutters the current desktop by smart-placing all clients again.
+     **/
+    void unclutterDesktop();
+
     static Policy policyFromString(const QString& policy, bool no_special);
     static const char* policyToString(Policy policy);
 
 private:
-
     void place(Client* c, QRect& area, Policy policy, Policy nextPlacement = Unknown);
     void placeUnderMouse(Client* c, QRect& area, Policy next = Unknown);
     void placeOnMainWindow(Client* c, QRect& area, Policy next = Unknown);
     QRect checkArea(const Client*c, const QRect& area);
-
-    Placement();
 
     //CT needed for cascading+
     struct DesktopCascadingInfo {
@@ -93,7 +101,7 @@ private:
 
     QList<DesktopCascadingInfo> cci;
 
-    Workspace* m_WorkspacePtr;
+    KWIN_SINGLETON(Placement)
 };
 
 } // namespace

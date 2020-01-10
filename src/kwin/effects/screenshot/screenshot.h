@@ -2,7 +2,7 @@
  KWin - the KDE window manager
  This file is part of the KDE project.
 
- Copyright (C) 2010 Martin Gräßlin <kde@martin-graesslin.com>
+ Copyright (C) 2010 Martin Gräßlin <mgraesslin@kde.org>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -80,9 +80,10 @@ private slots:
 private:
     void grabPointerImage(QImage& snapshot, int offsetx, int offsety);
     QString blitScreenshot(const QRect &geometry);
+    void setMatrix(int width, int height);
+    void restoreMatrix();
     EffectWindow *m_scheduledScreenshot;
     ScreenShotType m_type;
-    QPixmap m_lastScreenshot;
 };
 
 } // namespace

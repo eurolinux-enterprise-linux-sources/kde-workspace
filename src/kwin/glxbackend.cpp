@@ -35,18 +35,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // KDE
 #include <KDE/KDebug>
 #include <KDE/KXErrorHandler>
+// system
+#include <unistd.h>
 
 namespace KWin
 {
 GlxBackend::GlxBackend()
     : OpenGLBackend()
-    , gcroot(None)
-    , buffer(None)
-    , fbcbuffer_db(NULL)
-    , fbcbuffer_nondb(NULL)
-    , fbcbuffer(NULL)
-    , glxbuffer(None)
-    , ctxbuffer(None)
+    , window(None)
+    , fbconfig(NULL)
+    , glxWindow(None)
+    , ctx(None)
+    , m_bufferAge(0)
     , haveSwapInterval(false)
 {
     init();
@@ -57,25 +57,23 @@ GlxBackend::~GlxBackend()
     // TODO: cleanup in error case
     // do cleanup after initBuffer()
     cleanupGL();
-    glXMakeCurrent(display(), None, NULL);
-    if (ctxbuffer)
-        glXDestroyContext(display(), ctxbuffer);
-    if (overlayWindow()->window()) {
-        if (hasGLXVersion(1, 3) && glxbuffer)
-            glXDestroyWindow(display(), glxbuffer);
-        if (buffer)
-            XDestroyWindow(display(), buffer);
-        overlayWindow()->destroy();
-    } else {
-        if (glxbuffer)
-            glXDestroyPixmap(display(), glxbuffer);
-        if (gcroot)
-            XFreeGC(display(), gcroot);
-        if (buffer)
-            XFreePixmap(display(), buffer);
-    }
     checkGLError("Cleanup");
+    glXMakeCurrent(display(), None, NULL);
+
+    if (ctx)
+        glXDestroyContext(display(), ctx);
+
+    if (glxWindow)
+        glXDestroyWindow(display(), glxWindow);
+
+    if (window)
+        XDestroyWindow(display(), window);
+
+    overlayWindow()->destroy();
 }
+
+static bool gs_tripleBufferUndetected = true;
+static bool gs_tripleBufferNeedsDetection = false;
 
 void GlxBackend::init()
 {
@@ -100,30 +98,55 @@ void GlxBackend::init()
     // Initialize OpenGL
     GLPlatform *glPlatform = GLPlatform::instance();
     glPlatform->detect(GlxPlatformInterface);
+    if (GLPlatform::instance()->driver() == Driver_Intel)
+        options->setUnredirectFullscreen(false); // bug #252817
+    options->setGlPreferBufferSwap(options->glPreferBufferSwap()); // resolve autosetting
+    if (options->glPreferBufferSwap() == Options::AutoSwapStrategy)
+        options->setGlPreferBufferSwap('e'); // for unknown drivers - should not happen
     glPlatform->printResults();
     initGL(GlxPlatformInterface);
+
     // Check whether certain features are supported
     haveSwapInterval = glXSwapIntervalMESA || glXSwapIntervalEXT || glXSwapIntervalSGI;
-    if (options->isGlVSync()) {
-        if (glXGetVideoSync && haveSwapInterval && glXIsDirect(display(), ctxbuffer)) {
+
+    setSupportsBufferAge(false);
+
+    if (hasGLExtension("GLX_EXT_buffer_age")) {
+        const QByteArray useBufferAge = qgetenv("KWIN_USE_BUFFER_AGE");
+
+        if (useBufferAge != "0")
+            setSupportsBufferAge(true);
+    }
+
+    setSyncsToVBlank(false);
+    setBlocksForRetrace(false);
+    haveWaitSync = false;
+    gs_tripleBufferNeedsDetection = false;
+    m_swapProfiler.init();
+    const bool wantSync = options->glPreferBufferSwap() != Options::NoSwapEncourage;
+    if (wantSync && glXIsDirect(display(), ctx)) {
+        if (haveSwapInterval) { // glXSwapInterval is preferred being more reliable
+            setSwapInterval(1);
+            setSyncsToVBlank(true);
+            const QByteArray tripleBuffer = qgetenv("KWIN_TRIPLE_BUFFER");
+            if (!tripleBuffer.isEmpty()) {
+                setBlocksForRetrace(qstrcmp(tripleBuffer, "0") == 0);
+                gs_tripleBufferUndetected = false;
+            }
+            gs_tripleBufferNeedsDetection = gs_tripleBufferUndetected;
+        } else if (glXGetVideoSync) {
             unsigned int sync;
-            if (glXGetVideoSync(&sync) == 0) {
-                if (glXWaitVideoSync(1, 0, &sync) == 0) {
-                    // NOTICE at this time we should actually check whether we can successfully
-                    // deactivate the swapInterval "glXSwapInterval(0) == 0"
-                    // (because we don't actually want it active unless we explicitly run a glXSwapBuffers)
-                    // However mesa/dri will return a range error (6) because deactivating the
-                    // swapinterval (as of today) seems completely unsupported
-                    setHasWaitSync(true);
-                    setSwapInterval(0);
-                }
-                else
-                    qWarning() << "NO VSYNC! glXWaitVideoSync(1,0,&uint) isn't 0 but" << glXWaitVideoSync(1, 0, &sync);
+            if (glXGetVideoSync(&sync) == 0 && glXWaitVideoSync(1, 0, &sync) == 0) {
+                setSyncsToVBlank(true);
+                setBlocksForRetrace(true);
+                haveWaitSync = true;
             } else
-                qWarning() << "NO VSYNC! glXGetVideoSync(&uint) isn't 0 but" << glXGetVideoSync(&sync);
+                qWarning() << "NO VSYNC! glXSwapInterval is not supported, glXWaitVideoSync is supported but broken";
         } else
-            qWarning() << "NO VSYNC! glXGetVideoSync, haveSwapInterval, glXIsDirect" <<
-                        bool(glXGetVideoSync) << haveSwapInterval << glXIsDirect(display(), ctxbuffer);
+            qWarning() << "NO VSYNC! neither glSwapInterval nor glXWaitVideoSync are supported";
+    } else {
+        // disable v-sync (if possible)
+        setSwapInterval(0);
     }
     if (glPlatform->isVirtualBox()) {
         // VirtualBox does not support glxQueryDrawable
@@ -131,335 +154,273 @@ void GlxBackend::init()
         // and the GLPlatform has not been initialized at the moment when initGLX() is called.
         glXQueryDrawable = NULL;
     }
-    setIsDirectRendering(bool(glXIsDirect(display(), ctxbuffer)));
-    kDebug(1212) << "DB:" << isDoubleBuffer() << ", Direct:" << isDirectRendering() << endl;
-}
 
+    setIsDirectRendering(bool(glXIsDirect(display(), ctx)));
+
+    kDebug(1212) << "Direct rendering:" << isDirectRendering() << endl;
+}
 
 bool GlxBackend::initRenderingContext()
 {
-    bool direct_rendering = options->isGlDirect();
-    KXErrorHandler errs1;
-    ctxbuffer = glXCreateNewContext(display(), fbcbuffer, GLX_RGBA_TYPE, NULL,
-                                    direct_rendering ? GL_TRUE : GL_FALSE);
-    bool failed = (ctxbuffer == NULL || !glXMakeCurrent(display(), glxbuffer, ctxbuffer));
-    if (errs1.error(true))    // always check for error( having it all in one if () could skip
-        failed = true;       // it due to evaluation short-circuiting
-    if (failed) {
-        if (!direct_rendering) {
-            kDebug(1212).nospace() << "Couldn't initialize rendering context ("
-                                   << KXErrorHandler::errorMessage(errs1.errorEvent()) << ")";
-            return false;
+    bool direct = options->isGlDirect();
+
+    // Use glXCreateContextAttribsARB() when it's available
+    if (glXCreateContextAttribsARB) {
+        const int attribs_31_core_robustness[] = {
+            GLX_CONTEXT_MAJOR_VERSION_ARB,               3,
+            GLX_CONTEXT_MINOR_VERSION_ARB,               1,
+            GLX_CONTEXT_FLAGS_ARB,                       GLX_CONTEXT_ROBUST_ACCESS_BIT_ARB,
+            GLX_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB, GLX_LOSE_CONTEXT_ON_RESET_ARB,
+            0
+        };
+
+        const int attribs_31_core[] = {
+            GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
+            GLX_CONTEXT_MINOR_VERSION_ARB, 1,
+            0
+        };
+
+        const int attribs_legacy_robustness[] = {
+            GLX_CONTEXT_FLAGS_ARB,                       GLX_CONTEXT_ROBUST_ACCESS_BIT_ARB,
+            GLX_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB, GLX_LOSE_CONTEXT_ON_RESET_ARB,
+            0
+        };
+
+        const int attribs_legacy[] = {
+            GLX_CONTEXT_MAJOR_VERSION_ARB,               1,
+            GLX_CONTEXT_MINOR_VERSION_ARB,               2,
+            0
+        };
+
+        const bool have_robustness = hasGLExtension("GLX_ARB_create_context_robustness");
+
+        // Try to create a 3.1 context first
+        if (options->glCoreProfile()) {
+            if (have_robustness)
+                ctx = glXCreateContextAttribsARB(display(), fbconfig, 0, direct, attribs_31_core_robustness);
+
+            if (!ctx)
+                ctx = glXCreateContextAttribsARB(display(), fbconfig, 0, direct, attribs_31_core);
         }
-        glXMakeCurrent(display(), None, NULL);
-        if (ctxbuffer != NULL)
-            glXDestroyContext(display(), ctxbuffer);
-        direct_rendering = false; // try again
-        KXErrorHandler errs2;
-        ctxbuffer = glXCreateNewContext(display(), fbcbuffer, GLX_RGBA_TYPE, NULL, GL_FALSE);
-        bool failed = (ctxbuffer == NULL || !glXMakeCurrent(display(), glxbuffer, ctxbuffer));
-        if (errs2.error(true))
-            failed = true;
-        if (failed) {
-            kDebug(1212).nospace() << "Couldn't initialize rendering context ("
-                                   << KXErrorHandler::errorMessage(errs2.errorEvent()) << ")";
-            return false;
-        }
+
+        if (!ctx && have_robustness)
+            ctx = glXCreateContextAttribsARB(display(), fbconfig, 0, direct, attribs_legacy_robustness);
+
+        if (!ctx)
+            ctx = glXCreateContextAttribsARB(display(), fbconfig, 0, direct, attribs_legacy);
     }
+
+    if (!ctx)
+        ctx = glXCreateNewContext(display(), fbconfig, GLX_RGBA_TYPE, NULL, direct);
+
+    if (!ctx) {
+        kDebug(1212) << "Failed to create an OpenGL context.";
+        return false;
+    }
+
+    if (!glXMakeCurrent(display(), glxWindow, ctx)) {
+        kDebug(1212) << "Failed to make the OpenGL context current.";
+        glXDestroyContext(display(), ctx);
+        ctx = 0;
+        return false;
+    }
+
     return true;
 }
 
 bool GlxBackend::initBuffer()
 {
-    if (!initBufferConfigs())
+    if (!initFbConfig())
         return false;
-    if (fbcbuffer_db != NULL && overlayWindow()->create()) {
-        // we have overlay, try to create double-buffered window in it
-        fbcbuffer = fbcbuffer_db;
-        XVisualInfo* visual = glXGetVisualFromFBConfig(display(), fbcbuffer);
+
+    if (overlayWindow()->create()) {
+        // Try to create double-buffered window in the overlay
+        XVisualInfo* visual = glXGetVisualFromFBConfig(display(), fbconfig);
+        if (!visual) {
+           kError(1212) << "Failed to get visual from fbconfig";
+           return false;
+        }
         XSetWindowAttributes attrs;
         attrs.colormap = XCreateColormap(display(), rootWindow(), visual->visual, AllocNone);
-        buffer = XCreateWindow(display(), overlayWindow()->window(), 0, 0, displayWidth(), displayHeight(),
+        window = XCreateWindow(display(), overlayWindow()->window(), 0, 0, displayWidth(), displayHeight(),
                                0, visual->depth, InputOutput, visual->visual, CWColormap, &attrs);
-        if (hasGLXVersion(1, 3))
-            glxbuffer = glXCreateWindow(display(), fbcbuffer, buffer, NULL);
-        else
-            glxbuffer = buffer;
-        overlayWindow()->setup(buffer);
-        setDoubleBuffer(true);
-        XFree(visual);
-    } else if (fbcbuffer_nondb != NULL) {
-        // cannot get any double-buffered drawable, will double-buffer using a pixmap
-        fbcbuffer = fbcbuffer_nondb;
-        XVisualInfo* visual = glXGetVisualFromFBConfig(display(), fbcbuffer);
-        XGCValues gcattr;
-        gcattr.subwindow_mode = IncludeInferiors;
-        gcroot = XCreateGC(display(), rootWindow(), GCSubwindowMode, &gcattr);
-        buffer = XCreatePixmap(display(), rootWindow(), displayWidth(), displayHeight(),
-                               visual->depth);
-        glxbuffer = glXCreatePixmap(display(), fbcbuffer, buffer, NULL);
-        setDoubleBuffer(false);
+        glxWindow = glXCreateWindow(display(), fbconfig, window, NULL);
+        overlayWindow()->setup(window);
         XFree(visual);
     } else {
-        kError(1212) << "Couldn't create output buffer (failed to create overlay window?) !";
-        return false; // error
+        kError(1212) << "Failed to create overlay window";
+        return false;
     }
+
     int vis_buffer;
-    glXGetFBConfigAttrib(display(), fbcbuffer, GLX_VISUAL_ID, &vis_buffer);
-    XVisualInfo* visinfo_buffer = glXGetVisualFromFBConfig(display(), fbcbuffer);
+    glXGetFBConfigAttrib(display(), fbconfig, GLX_VISUAL_ID, &vis_buffer);
+    XVisualInfo* visinfo_buffer = glXGetVisualFromFBConfig(display(), fbconfig);
     kDebug(1212) << "Buffer visual (depth " << visinfo_buffer->depth << "): 0x" << QString::number(vis_buffer, 16);
     XFree(visinfo_buffer);
+
     return true;
 }
 
-bool GlxBackend::initBufferConfigs()
+bool GlxBackend::initFbConfig()
 {
-    int cnt;
-    GLXFBConfig *fbconfigs = glXGetFBConfigs(display(), DefaultScreen(display()), &cnt);
-    fbcbuffer_db = NULL;
-    fbcbuffer_nondb = NULL;
+    const int attribs[] = {
+        GLX_RENDER_TYPE,    GLX_RGBA_BIT,
+        GLX_DRAWABLE_TYPE,  GLX_WINDOW_BIT,
+        GLX_RED_SIZE,       1,
+        GLX_GREEN_SIZE,     1,
+        GLX_BLUE_SIZE,      1,
+        GLX_ALPHA_SIZE,     0,
+        GLX_DEPTH_SIZE,     0,
+        GLX_STENCIL_SIZE,   0,
+        GLX_CONFIG_CAVEAT,  GLX_NONE,
+        GLX_DOUBLEBUFFER,   true,
+        0
+    };
 
-    for (int i = 0; i < 2; i++) {
-        int back, stencil, depth, caveat, msaa_buffers, msaa_samples, alpha;
-        back = i > 0 ? INT_MAX : 1;
-        stencil = INT_MAX;
-        depth = INT_MAX;
-        caveat = INT_MAX;
-        msaa_buffers = INT_MAX;
-        msaa_samples = INT_MAX;
-        alpha = 0;
+    // Try to find a double buffered configuration
+    int count = 0;
+    GLXFBConfig *configs = glXChooseFBConfig(display(), DefaultScreen(display()), attribs, &count);
 
-        for (int j = 0; j < cnt; j++) {
-            XVisualInfo *vi;
-            int visual_depth;
-            vi = glXGetVisualFromFBConfig(display(), fbconfigs[ j ]);
-            if (vi == NULL)
-                continue;
-            visual_depth = vi->depth;
-            XFree(vi);
-            if (visual_depth != DefaultDepth(display(), DefaultScreen(display())))
-                continue;
-            int value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_ALPHA_SIZE, &alpha);
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_BUFFER_SIZE, &value);
-            if (value != visual_depth && (value - alpha) != visual_depth)
-                continue;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_RENDER_TYPE, &value);
-            if (!(value & GLX_RGBA_BIT))
-                continue;
-            int back_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_DOUBLEBUFFER, &back_value);
-            if (i > 0) {
-                if (back_value > back)
-                    continue;
-            } else {
-                if (back_value < back)
-                    continue;
-            }
-            int stencil_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_STENCIL_SIZE, &stencil_value);
-            if (stencil_value > stencil)
-                continue;
-            int depth_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_DEPTH_SIZE, &depth_value);
-            if (depth_value > depth)
-                continue;
-            int caveat_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_CONFIG_CAVEAT, &caveat_value);
-            if (caveat_value > caveat)
-                continue;
-
-            int msaa_buffers_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[j], GLX_SAMPLE_BUFFERS,
-                                 &msaa_buffers_value);
-            if (msaa_buffers_value > msaa_buffers)
-                continue;
-
-            int msaa_samples_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[j], GLX_SAMPLES,
-                                 &msaa_samples_value);
-            if (msaa_samples_value > msaa_samples)
-                continue;
-
-            back = back_value;
-            stencil = stencil_value;
-            depth = depth_value;
-            caveat = caveat_value;
-            msaa_buffers = msaa_buffers_value;
-            msaa_samples = msaa_samples_value;
-
-            if (i > 0)
-                fbcbuffer_nondb = fbconfigs[ j ];
-            else
-                fbcbuffer_db = fbconfigs[ j ];
-        }
+    if (count > 0) {
+        fbconfig = configs[0];
+        XFree(configs);
     }
-    if (cnt)
-        XFree(fbconfigs);
-    if (fbcbuffer_db == NULL && fbcbuffer_nondb == NULL) {
-        kError(1212) << "Couldn't find framebuffer configuration for buffer!";
+
+    if (fbconfig == NULL) {
+        kError(1212) << "Failed to find a usable framebuffer configuration";
         return false;
     }
-    for (int i = 0; i <= 32; i++) {
-        if (fbcdrawableinfo[ i ].fbconfig == NULL)
-            continue;
-        int vis_drawable = 0;
-        glXGetFBConfigAttrib(display(), fbcdrawableinfo[ i ].fbconfig, GLX_VISUAL_ID, &vis_drawable);
-        kDebug(1212) << "Drawable visual (depth " << i << "): 0x" << QString::number(vis_drawable, 16);
-    }
+
     return true;
 }
 
 bool GlxBackend::initDrawableConfigs()
 {
-    int cnt;
-    GLXFBConfig *fbconfigs = glXGetFBConfigs(display(), DefaultScreen(display()), &cnt);
+    const int attribs[] = {
+        GLX_RENDER_TYPE,    GLX_RGBA_BIT,
+        GLX_DRAWABLE_TYPE,  GLX_WINDOW_BIT | GLX_PIXMAP_BIT,
+        GLX_X_VISUAL_TYPE,  GLX_TRUE_COLOR,
+        GLX_X_RENDERABLE,   True,
+        GLX_CONFIG_CAVEAT,  int(GLX_DONT_CARE), // The ARGB32 visual is marked non-conformant in Catalyst
+        GLX_RED_SIZE,       5,
+        GLX_GREEN_SIZE,     5,
+        GLX_BLUE_SIZE,      5,
+        GLX_ALPHA_SIZE,     0,
+        GLX_STENCIL_SIZE,   0,
+        GLX_DEPTH_SIZE,     0,
+        0
+    };
+
+    int count = 0;
+    GLXFBConfig *configs = glXChooseFBConfig(display(), DefaultScreen(display()), attribs, &count);
+
+    if (count < 1) {
+        kError(1212) << "Could not find any usable framebuffer configurations.";
+        return false;
+    }
 
     for (int i = 0; i <= 32; i++) {
-        int back, stencil, depth, caveat, alpha, mipmap, msaa_buffers, msaa_samples, rgba;
-        back = INT_MAX;
-        stencil = INT_MAX;
-        depth = INT_MAX;
-        caveat = INT_MAX;
-        msaa_buffers = INT_MAX;
-        msaa_samples = INT_MAX;
-        mipmap = 0;
-        rgba = 0;
-        fbcdrawableinfo[ i ].fbconfig = NULL;
-        fbcdrawableinfo[ i ].bind_texture_format = 0;
-        fbcdrawableinfo[ i ].texture_targets = 0;
-        fbcdrawableinfo[ i ].y_inverted = 0;
-        fbcdrawableinfo[ i ].mipmap = 0;
-        for (int j = 0; j < cnt; j++) {
-            XVisualInfo *vi;
-            int visual_depth;
-            vi = glXGetVisualFromFBConfig(display(), fbconfigs[ j ]);
+        fbcdrawableinfo[i].fbconfig            = NULL;
+        fbcdrawableinfo[i].bind_texture_format = 0;
+        fbcdrawableinfo[i].texture_targets     = 0;
+        fbcdrawableinfo[i].y_inverted          = 0;
+        fbcdrawableinfo[i].mipmap              = 0;
+    }
+
+    // Find the first usable framebuffer configuration for each depth.
+    // Single-buffered ones will appear first in the list.
+    const int depths[] = { 15, 16, 24, 30, 32 };
+    for (unsigned int i = 0; i < sizeof(depths) / sizeof(depths[0]); i++) {
+        const int depth = depths[i];
+
+        for (int j = 0; j < count; j++) {
+            int alpha_size, buffer_size;
+            glXGetFBConfigAttrib(display(), configs[j], GLX_ALPHA_SIZE,  &alpha_size);
+            glXGetFBConfigAttrib(display(), configs[j], GLX_BUFFER_SIZE, &buffer_size);
+
+            if (buffer_size != depth && (buffer_size - alpha_size) != depth)
+                continue;
+
+            if (depth == 32 && alpha_size != 8)
+                continue;
+
+            XVisualInfo *vi = glXGetVisualFromFBConfig(display(), configs[j]);
             if (vi == NULL)
                 continue;
-            visual_depth = vi->depth;
+
+            int visual_depth = vi->depth;
             XFree(vi);
-            if (visual_depth != i)
-                continue;
-            int value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_ALPHA_SIZE, &alpha);
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_BUFFER_SIZE, &value);
-            if (value != i && (value - alpha) != i)
-                continue;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_RENDER_TYPE, &value);
-            if (!(value & GLX_RGBA_BIT))
-                continue;
-            value = 0;
-            if (i == 32) {
-                glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                     GLX_BIND_TO_TEXTURE_RGBA_EXT, &value);
-                if (value) {
-                    // TODO I think this should be set only after the config passes all tests
-                    rgba = 1;
-                    fbcdrawableinfo[ i ].bind_texture_format = GLX_TEXTURE_FORMAT_RGBA_EXT;
-                }
-            }
-            if (!value) {
-                if (rgba)
-                    continue;
-                glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                     GLX_BIND_TO_TEXTURE_RGB_EXT, &value);
-                if (!value)
-                    continue;
-                fbcdrawableinfo[ i ].bind_texture_format = GLX_TEXTURE_FORMAT_RGB_EXT;
-            }
-            int back_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_DOUBLEBUFFER, &back_value);
-            if (back_value > back)
-                continue;
-            int stencil_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_STENCIL_SIZE, &stencil_value);
-            if (stencil_value > stencil)
-                continue;
-            int depth_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_DEPTH_SIZE, &depth_value);
-            if (depth_value > depth)
-                continue;
-            int caveat_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_CONFIG_CAVEAT, &caveat_value);
-            if (caveat_value > caveat)
+
+            if (visual_depth != depth)
                 continue;
 
-            int msaa_buffers_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[j], GLX_SAMPLE_BUFFERS,
-                                 &msaa_buffers_value);
-            if (msaa_buffers_value > msaa_buffers)
+            int bind_rgb, bind_rgba;
+            glXGetFBConfigAttrib(display(), configs[j], GLX_BIND_TO_TEXTURE_RGBA_EXT, &bind_rgba);
+            glXGetFBConfigAttrib(display(), configs[j], GLX_BIND_TO_TEXTURE_RGB_EXT,  &bind_rgb);
+
+            // Skip this config if it cannot be bound to a texture
+            if (!bind_rgb && !bind_rgba)
                 continue;
 
-            int msaa_samples_value;
-            glXGetFBConfigAttrib(display(), fbconfigs[j], GLX_SAMPLES,
-                                 &msaa_samples_value);
-            if (msaa_samples_value > msaa_samples)
-                continue;
+            int texture_format;
+            if (depth == 32)
+                texture_format = bind_rgba ? GLX_TEXTURE_FORMAT_RGBA_EXT : GLX_TEXTURE_FORMAT_RGB_EXT;
+            else
+                texture_format = bind_rgb ? GLX_TEXTURE_FORMAT_RGB_EXT : GLX_TEXTURE_FORMAT_RGBA_EXT;
 
-            // ok, config passed all tests, it's the best one so far
-            fbcdrawableinfo[ i ].fbconfig = fbconfigs[ j ];
-            caveat = caveat_value;
-            back = back_value;
-            stencil = stencil_value;
-            depth = depth_value;
-            msaa_buffers = msaa_buffers_value;
-            msaa_samples = msaa_samples_value;
-            mipmap = 0;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_BIND_TO_TEXTURE_TARGETS_EXT, &value);
-            fbcdrawableinfo[ i ].texture_targets = value;
-            glXGetFBConfigAttrib(display(), fbconfigs[ j ],
-                                 GLX_Y_INVERTED_EXT, &value);
-            fbcdrawableinfo[ i ].y_inverted = value;
-            fbcdrawableinfo[ i ].mipmap = mipmap;
+            int y_inverted, texture_targets;
+            glXGetFBConfigAttrib(display(), configs[j], GLX_BIND_TO_TEXTURE_TARGETS_EXT, &texture_targets);
+            glXGetFBConfigAttrib(display(), configs[j], GLX_Y_INVERTED_EXT, &y_inverted);
+
+            fbcdrawableinfo[depth].fbconfig            = configs[j];
+            fbcdrawableinfo[depth].bind_texture_format = texture_format;
+            fbcdrawableinfo[depth].texture_targets     = texture_targets;
+            fbcdrawableinfo[depth].y_inverted          = y_inverted;
+            fbcdrawableinfo[depth].mipmap              = 0;
+            break;
         }
     }
-    if (cnt)
-        XFree(fbconfigs);
-    if (fbcdrawableinfo[ DefaultDepth(display(), DefaultScreen(display()))].fbconfig == NULL) {
-        kError(1212) << "Couldn't find framebuffer configuration for default depth!";
+
+    if (count)
+        XFree(configs);
+
+    if (fbcdrawableinfo[DefaultDepth(display(), DefaultScreen(display()))].fbconfig == NULL) {
+        kError(1212) << "Could not find a framebuffer configuration for the default depth.";
         return false;
     }
-    if (fbcdrawableinfo[ 32 ].fbconfig == NULL) {
-        kError(1212) << "Couldn't find framebuffer configuration for depth 32 (no ARGB GLX visual)!";
+
+    if (fbcdrawableinfo[32].fbconfig == NULL) {
+        kError(1212) << "Could not find a framebuffer configuration for depth 32.";
         return false;
     }
+
+    for (int i = 0; i <= 32; i++) {
+        if (fbcdrawableinfo[i].fbconfig == NULL)
+            continue;
+
+        int vis_drawable = 0;
+        glXGetFBConfigAttrib(display(), fbcdrawableinfo[i].fbconfig, GLX_VISUAL_ID, &vis_drawable);
+
+        kDebug(1212) << "Drawable visual (depth " << i << "): 0x" << QString::number(vis_drawable, 16);
+    }
+
     return true;
 }
 
 void GlxBackend::setSwapInterval(int interval)
 {
     if (glXSwapIntervalEXT)
-        glXSwapIntervalEXT(display(), glxbuffer, interval);
+        glXSwapIntervalEXT(display(), glxWindow, interval);
     else if (glXSwapIntervalMESA)
         glXSwapIntervalMESA(interval);
     else if (glXSwapIntervalSGI)
         glXSwapIntervalSGI(interval);
 }
 
-#define VSYNC_DEBUG 0
-
 void GlxBackend::waitSync()
 {
     // NOTE that vsync has no effect with indirect rendering
-    if (waitSyncAvailable()) {
-#if VSYNC_DEBUG
-        startRenderTimer();
-#endif
+    if (haveWaitSync) {
         uint sync;
 #if 0
         // TODO: why precisely is this important?
@@ -470,120 +431,82 @@ void GlxBackend::waitSync()
 #else
         glXWaitVideoSync(1, 0, &sync);
 #endif
-#if VSYNC_DEBUG
-        static int waitTime = 0, waitCounter = 0, doubleSyncCounter = 0;
-        if (renderTime() > 11)
-            ++doubleSyncCounter;
-        waitTime += renderTime();
-        ++waitCounter;
-        if (waitCounter > 99)
-        {
-            qDebug() << "mean vsync wait time:" << float((float)waitTime / (float)waitCounter) << doubleSyncCounter << "/100";
-            doubleSyncCounter = waitTime = waitCounter = 0;
-        }
-#endif
     }
-    startRenderTimer(); // yes, the framerate shall be constant anyway.
 }
-
-#undef VSYNC_DEBUG
 
 void GlxBackend::present()
 {
-    if (isDoubleBuffer()) {
-        if (lastMask() & Scene::PAINT_SCREEN_REGION) {
-            waitSync();
-            if (glXCopySubBuffer) {
-                foreach (const QRect & r, lastDamage().rects()) {
-                    // convert to OpenGL coordinates
-                    int y = displayHeight() - r.y() - r.height();
-                    glXCopySubBuffer(display(), glxbuffer, r.x(), y, r.width(), r.height());
-                }
-            } else {
-                // if a shader is bound or the texture unit is enabled, copy pixels results in a black screen
-                // therefore unbind the shader and restore after copying the pixels
-                GLint shader = 0;
-                if (ShaderManager::instance()->isShaderBound()) {
-                    glGetIntegerv(GL_CURRENT_PROGRAM, &shader);
-                    glUseProgram(0);
-                }
-                bool reenableTexUnit = false;
-                if (glIsEnabled(GL_TEXTURE_2D)) {
-                    glDisable(GL_TEXTURE_2D);
-                    reenableTexUnit = true;
-                }
-                // no idea why glScissor() is used, but Compiz has it and it doesn't seem to hurt
-                glEnable(GL_SCISSOR_TEST);
-                glDrawBuffer(GL_FRONT);
-                int xpos = 0;
-                int ypos = 0;
-                foreach (const QRect & r, lastDamage().rects()) {
-                    // convert to OpenGL coordinates
-                    int y = displayHeight() - r.y() - r.height();
-                    // Move raster position relatively using glBitmap() rather
-                    // than using glRasterPos2f() - the latter causes drawing
-                    // artefacts at the bottom screen edge with some gfx cards
-//                    glRasterPos2f( r.x(), r.y() + r.height());
-                    glBitmap(0, 0, 0, 0, r.x() - xpos, y - ypos, NULL);
-                    xpos = r.x();
-                    ypos = y;
-                    glScissor(r.x(), y, r.width(), r.height());
-                    glCopyPixels(r.x(), y, r.width(), r.height(), GL_COLOR);
-                }
-                glBitmap(0, 0, 0, 0, -xpos, -ypos, NULL);   // move position back to 0,0
-                glDrawBuffer(GL_BACK);
-                glDisable(GL_SCISSOR_TEST);
-                if (reenableTexUnit) {
-                    glEnable(GL_TEXTURE_2D);
-                }
-                // rebind previously bound shader
-                if (ShaderManager::instance()->isShaderBound()) {
-                    glUseProgram(shader);
+    if (lastDamage().isEmpty())
+        return;
+
+    const QRegion displayRegion(0, 0, displayWidth(), displayHeight());
+    const bool fullRepaint = supportsBufferAge() || (lastDamage() == displayRegion);
+
+    if (fullRepaint) {
+        if (haveSwapInterval) {
+            if (gs_tripleBufferNeedsDetection) {
+                glXWaitGL();
+                m_swapProfiler.begin();
+            }
+            glXSwapBuffers(display(), glxWindow);
+            if (gs_tripleBufferNeedsDetection) {
+                glXWaitGL();
+                if (char result = m_swapProfiler.end()) {
+                    gs_tripleBufferUndetected = gs_tripleBufferNeedsDetection = false;
+                    if (result == 'd' && GLPlatform::instance()->driver() == Driver_NVidia) {
+                        // TODO this is a workaround, we should get __GL_YIELD set before libGL checks it
+                        if (qstrcmp(qgetenv("__GL_YIELD"), "USLEEP")) {
+                            options->setGlPreferBufferSwap(0);
+                            setSwapInterval(0);
+                            kWarning(1212) << "\nIt seems you are using the nvidia driver without triple buffering\n"
+                                              "You must export __GL_YIELD=\"USLEEP\" to prevent large CPU overhead on synced swaps\n"
+                                              "Preferably, enable the TripleBuffer Option in the xorg.conf Device\n"
+                                              "For this reason, the tearing prevention has been disabled.\n"
+                                              "See https://bugs.kde.org/show_bug.cgi?id=322060\n";
+                        }
+                    }
+                    setBlocksForRetrace(result == 'd');
                 }
             }
         } else {
-            if (haveSwapInterval) {
-                setSwapInterval(options->isGlVSync() ? 1 : 0);
-                glXSwapBuffers(display(), glxbuffer);
-                setSwapInterval(0);
-                startRenderTimer(); // this is important so we don't assume to be loosing frames in the compositor timing calculation
-            } else {
-                waitSync();
-                glXSwapBuffers(display(), glxbuffer);
-            }
+            waitSync();
+            glXSwapBuffers(display(), glxWindow);
         }
-        glXWaitGL();
-    } else {
-        glXWaitGL();
-        if (lastMask() & Scene::PAINT_SCREEN_REGION)
-            foreach (const QRect & r, lastDamage().rects())
-                XCopyArea(display(), buffer, rootWindow(), gcroot, r.x(), r.y(), r.width(), r.height(), r.x(), r.y());
-        else
-            XCopyArea(display(), buffer, rootWindow(), gcroot, 0, 0, displayWidth(), displayHeight(), 0, 0);
+        if (supportsBufferAge()) {
+            glXQueryDrawable(display(), glxWindow, GLX_BACK_BUFFER_AGE_EXT, (GLuint *) &m_bufferAge);
+        }
+    } else if (glXCopySubBuffer) {
+        foreach (const QRect & r, lastDamage().rects()) {
+            // convert to OpenGL coordinates
+            int y = displayHeight() - r.y() - r.height();
+            glXCopySubBuffer(display(), glxWindow, r.x(), y, r.width(), r.height());
+        }
+    } else { // Copy Pixels (horribly slow on Mesa)
+        glDrawBuffer(GL_FRONT);
+        SceneOpenGL::copyPixels(lastDamage());
+        glDrawBuffer(GL_BACK);
     }
-    XFlush(display());
+
+    setLastDamage(QRegion());
+    if (!supportsBufferAge()) {
+        glXWaitGL();
+        XFlush(display());
+    }
 }
 
 void GlxBackend::screenGeometryChanged(const QSize &size)
 {
-    if (overlayWindow()->window() == None) {
-        glXMakeCurrent(display(), None, NULL);
-        glXDestroyPixmap(display(), glxbuffer);
-        XFreePixmap(display(), buffer);
-        XVisualInfo* visual = glXGetVisualFromFBConfig(display(), fbcbuffer);
-        buffer = XCreatePixmap(display(), rootWindow(), size.width(), size.height(), visual->depth);
-        XFree(visual);
-        glxbuffer = glXCreatePixmap(display(), fbcbuffer, buffer, NULL);
-        glXMakeCurrent(display(), glxbuffer, ctxbuffer);
-        // TODO: there seems some bug, some clients become black until an eg. un/remap - could be a general pixmap buffer issue, though
-    } else {
-        glXMakeCurrent(display(), None, NULL); // deactivate context ////
-        XMoveResizeWindow(display(), buffer, 0,0, size.width(), size.height());
-        overlayWindow()->setup(buffer);
-        XSync(display(), false);  // ensure X11 stuff has applied ////
-        glXMakeCurrent(display(), glxbuffer, ctxbuffer); // reactivate context ////
-        glViewport(0,0, size.width(), size.height()); // adjust viewport last - should btw. be superfluous on the Pixmap buffer - iirc glXCreatePixmap sets the context anyway. ////
-    }
+    glXMakeCurrent(display(), None, NULL);
+
+    XMoveResizeWindow(display(), window, 0, 0, size.width(), size.height());
+    overlayWindow()->setup(window);
+    XSync(display(), false);
+
+    glXMakeCurrent(display(), glxWindow, ctx);
+    glViewport(0, 0, size.width(), size.height());
+
+    // The back buffer contents are now undefined
+    m_bufferAge = 0;
 }
 
 SceneOpenGL::TexturePrivate *GlxBackend::createBackendTexture(SceneOpenGL::Texture *texture)
@@ -591,21 +514,67 @@ SceneOpenGL::TexturePrivate *GlxBackend::createBackendTexture(SceneOpenGL::Textu
     return new GlxTexture(texture, this);
 }
 
-void GlxBackend::prepareRenderingFrame()
+QRegion GlxBackend::prepareRenderingFrame()
 {
-    if (!lastDamage().isEmpty())
-        present();
+    QRegion repaint;
+
+    if (gs_tripleBufferNeedsDetection) {
+        // the composite timer floors the repaint frequency. This can pollute our triple buffering
+        // detection because the glXSwapBuffers call for the new frame has to wait until the pending
+        // one scanned out.
+        // So we compensate for that by waiting an extra milisecond to give the driver the chance to
+        // fllush the buffer queue
+        usleep(1000);
+    }
+
+    present();
+
+    if (supportsBufferAge())
+        repaint = accumulatedDamageHistory(m_bufferAge);
+
+    startRenderTimer();
     glXWaitX();
+
+    return repaint;
 }
 
-void GlxBackend::endRenderingFrame(int mask, const QRegion &damage)
+void GlxBackend::endRenderingFrame(const QRegion &renderedRegion, const QRegion &damagedRegion)
 {
-    setLastDamage(damage);
-    setLastMask(mask);
-    glFlush();
+    if (damagedRegion.isEmpty()) {
+        setLastDamage(QRegion());
+
+        // If the damaged region of a window is fully occluded, the only
+        // rendering done, if any, will have been to repair a reused back
+        // buffer, making it identical to the front buffer.
+        //
+        // In this case we won't post the back buffer. Instead we'll just
+        // set the buffer age to 1, so the repaired regions won't be
+        // rendered again in the next frame.
+        if (!renderedRegion.isEmpty())
+            glFlush();
+
+        m_bufferAge = 1;
+        return;
+    }
+
+    setLastDamage(renderedRegion);
+
+    if (!blocksForRetrace()) {
+        // This also sets lastDamage to empty which prevents the frame from
+        // being posted again when prepareRenderingFrame() is called.
+        present();
+    } else {
+        // Make sure that the GPU begins processing the command stream
+        // now and not the next time prepareRenderingFrame() is called.
+        glFlush();
+    }
 
     if (overlayWindow()->window())  // show the window only after the first pass,
         overlayWindow()->show();   // since that pass may take long
+
+    // Save the damaged region to history
+    if (supportsBufferAge())
+        addToDamageHistory(damagedRegion);
 }
 
 
@@ -734,6 +703,9 @@ bool GlxTexture::loadTexture(const Pixmap& pix, const QSize& size, int depth)
 #ifdef CHECK_GL_ERROR
     checkGLError("TextureLoad0");
 #endif
+
+    updateMatrix();
+
     unbind();
     return true;
 }

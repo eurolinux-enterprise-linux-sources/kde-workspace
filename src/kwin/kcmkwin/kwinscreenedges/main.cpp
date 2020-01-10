@@ -2,7 +2,7 @@
  KWin - the KDE window manager
  This file is part of the KDE project.
 
-Copyright (C) 2008 Martin Gräßlin <kde@martin-graesslin.com>
+Copyright (C) 2008 Martin Gräßlin <mgraesslin@kde.org>
 Copyright (C) 2009 Lucas Murray <lmurray@undefinedfire.com>
 
 This program is free software; you can redistribute it and/or modify
@@ -54,10 +54,12 @@ KWinScreenEdgesConfig::KWinScreenEdgesConfig(QWidget* parent, const QVariantList
     connect(m_ui->monitor, SIGNAL(changed()), this, SLOT(changed()));
 
     connect(m_ui->desktopSwitchCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(changed()));
+    connect(m_ui->activationDelaySpin, SIGNAL(valueChanged(int)), this, SLOT(sanitizeCooldown()));
     connect(m_ui->activationDelaySpin, SIGNAL(valueChanged(int)), this, SLOT(changed()));
     connect(m_ui->triggerCooldownSpin, SIGNAL(valueChanged(int)), this, SLOT(changed()));
     connect(m_ui->quickMaximizeBox, SIGNAL(stateChanged(int)), this, SLOT(changed()));
     connect(m_ui->quickTileBox, SIGNAL(stateChanged(int)), this, SLOT(changed()));
+    connect(m_ui->electricBorderCornerRatio, SIGNAL(valueChanged(int)), this, SLOT(changed()));
 
     // Visual feedback of action group conflicts
     connect(m_ui->desktopSwitchCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(groupChanged()));
@@ -65,6 +67,8 @@ KWinScreenEdgesConfig::KWinScreenEdgesConfig(QWidget* parent, const QVariantList
     connect(m_ui->quickTileBox, SIGNAL(stateChanged(int)), this, SLOT(groupChanged()));
 
     load();
+
+    sanitizeCooldown();
 }
 
 KWinScreenEdgesConfig::~KWinScreenEdgesConfig()
@@ -96,6 +100,7 @@ void KWinScreenEdgesConfig::load()
     m_ui->triggerCooldownSpin->setValue(config.readEntry("ElectricBorderCooldown", 350));
     m_ui->quickMaximizeBox->setChecked(config.readEntry("ElectricBorderMaximize", true));
     m_ui->quickTileBox->setChecked(config.readEntry("ElectricBorderTiling", true));
+    m_ui->electricBorderCornerRatio->setValue(qRound(config.readEntry("ElectricBorderCornerRatio", 0.25)*100));
 
     emit changed(false);
 }
@@ -113,6 +118,7 @@ void KWinScreenEdgesConfig::save()
     config.writeEntry("ElectricBorderCooldown", m_ui->triggerCooldownSpin->value());
     config.writeEntry("ElectricBorderMaximize", m_ui->quickMaximizeBox->isChecked());
     config.writeEntry("ElectricBorderTiling", m_ui->quickTileBox->isChecked());
+    config.writeEntry("ElectricBorderCornerRatio", m_ui->electricBorderCornerRatio->value()/100.0);
 
     config.sync();
 
@@ -132,6 +138,7 @@ void KWinScreenEdgesConfig::defaults()
     m_ui->triggerCooldownSpin->setValue(350);
     m_ui->quickMaximizeBox->setChecked(true);
     m_ui->quickTileBox->setChecked(true);
+    m_ui->electricBorderCornerRatio->setValue(25);
 
     emit changed(true);
 }
@@ -141,6 +148,11 @@ void KWinScreenEdgesConfig::showEvent(QShowEvent* e)
     KCModule::showEvent(e);
 
     monitorShowEvent();
+}
+
+void KWinScreenEdgesConfig::sanitizeCooldown()
+{
+    m_ui->triggerCooldownSpin->setMinimum(m_ui->activationDelaySpin->value() + 50);
 }
 
 // Copied from kcmkwin/kwincompositing/main.cpp
@@ -216,16 +228,9 @@ void KWinScreenEdgesConfig::monitorInit()
         monitorAddItem(services.first()->name() + " - " + i18n("Cylinder"));
         monitorAddItem(services.first()->name() + " - " + i18n("Sphere"));
     }
-    services = trader->query("KWin/Effect", "[X-KDE-PluginInfo-Name] == 'kwin4_effect_flipswitch'");
-    if (services.isEmpty()) {
-        // adding empty strings in case the effect is not found
-        // TODO: after string freeze add a info that the effect is missing
-        monitorAddItem(QString());
-        monitorAddItem(QString());
-    } else {
-        monitorAddItem(services.first()->name() + " - " + i18n("All Desktops"));
-        monitorAddItem(services.first()->name() + " - " + i18n("Current Desktop"));
-    }
+
+    monitorAddItem(i18n("Toggle window switching"));
+    monitorAddItem(i18n("Toggle alternative window switching"));
 
     monitorShowEvent();
 }
@@ -308,21 +313,21 @@ void KWinScreenEdgesConfig::monitorLoad()
         monitorChangeEdge(ElectricBorder(i), int(Sphere));
     }
 
-    // Flip Switch
-    KConfigGroup flipSwitchConfig(m_config, "Effect-FlipSwitch");
+    // TabBox
+    KConfigGroup tabBoxConfig(m_config, "TabBox");
     list.clear();
-    // FlipSwitch BorderActivateAll
+    // TabBox
     list.append(int(ElectricNone));
-    list = flipSwitchConfig.readEntry("BorderActivateAll", list);
+    list = tabBoxConfig.readEntry("BorderActivate", list);
     foreach (int i, list) {
-        monitorChangeEdge(ElectricBorder(i), int(FlipSwitchAll));
+        monitorChangeEdge(ElectricBorder(i), int(TabBox));
     }
-    // FlipSwitch BorderActivate
+    // Alternative TabBox
     list.clear();
     list.append(int(ElectricNone));
-    list = flipSwitchConfig.readEntry("BorderActivate", list);
+    list = tabBoxConfig.readEntry("BorderAlternativeActivate", list);
     foreach (int i, list) {
-        monitorChangeEdge(ElectricBorder(i), int(FlipSwitchCurrent));
+        monitorChangeEdge(ElectricBorder(i), int(TabBoxAlternative));
     }
 }
 
@@ -389,12 +394,12 @@ void KWinScreenEdgesConfig::monitorSave()
     cubeConfig.writeEntry("BorderActivateSphere",
                           monitorCheckEffectHasEdge(int(Sphere)));
 
-    // Flip Switch
-    KConfigGroup flipSwitchConfig(m_config, "Effect-FlipSwitch");
-    flipSwitchConfig.writeEntry("BorderActivateAll",
-                                monitorCheckEffectHasEdge(int(FlipSwitchAll)));
-    flipSwitchConfig.writeEntry("BorderActivate",
-                                monitorCheckEffectHasEdge(int(FlipSwitchCurrent)));
+    // TabBox
+    KConfigGroup tabBoxConfig(m_config, "TabBox");
+    tabBoxConfig.writeEntry("BorderActivate",
+                                monitorCheckEffectHasEdge(int(TabBox)));
+    tabBoxConfig.writeEntry("BorderAlternativeActivate",
+                                monitorCheckEffectHasEdge(int(TabBoxAlternative)));
 }
 
 void KWinScreenEdgesConfig::monitorDefaults()
@@ -429,11 +434,6 @@ void KWinScreenEdgesConfig::monitorShowEvent()
         monitorItemSetEnabled(int(Cube), enabled);
         monitorItemSetEnabled(int(Cylinder), enabled);
         monitorItemSetEnabled(int(Sphere), enabled);
-
-        // Flip Switch
-        enabled = effectEnabled("flipswitch", config);
-        monitorItemSetEnabled(int(FlipSwitchAll), enabled);
-        monitorItemSetEnabled(int(FlipSwitchCurrent), enabled);
     } else { // Compositing disabled
         monitorItemSetEnabled(int(PresentWindowsCurrent), false);
         monitorItemSetEnabled(int(PresentWindowsAll), false);
@@ -441,9 +441,13 @@ void KWinScreenEdgesConfig::monitorShowEvent()
         monitorItemSetEnabled(int(Cube), false);
         monitorItemSetEnabled(int(Cylinder), false);
         monitorItemSetEnabled(int(Sphere), false);
-        monitorItemSetEnabled(int(FlipSwitchAll), false);
-        monitorItemSetEnabled(int(FlipSwitchCurrent), false);
     }
+    // tabbox, depends on reasonable focus policy.
+    KConfigGroup config2(m_config, "Windows");
+    QString focusPolicy = config2.readEntry("FocusPolicy", QString());
+    bool reasonable = focusPolicy != "FocusStrictlyUnderMouse" && focusPolicy != "FocusUnderMouse";
+    monitorItemSetEnabled(int(TabBox), reasonable);
+    monitorItemSetEnabled(int(TabBoxAlternative), reasonable);
 }
 
 void KWinScreenEdgesConfig::monitorChangeEdge(ElectricBorder border, int index)

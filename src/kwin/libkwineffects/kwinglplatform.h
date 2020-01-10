@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <kwinglobals.h>
 #include <kwinglutils_funcs.h>
 
+#include <QByteArray>
 #include <QSet>
 
 namespace KWin
@@ -307,6 +308,14 @@ public:
     CompositingType recommendedCompositor() const;
 
     /**
+     * Returns true if glMapBufferRange() is likely to perform worse than glBufferSubData()
+     * when updating an unused range of a buffer object, and false otherwise.
+     *
+     * @since 4.11
+     */
+    bool preferBufferSubData() const;
+
+    /**
      * @returns a human readable form of the @p version.
      * @since 4.9
      * @see glVersion
@@ -358,6 +367,7 @@ private:
     bool m_textureNPOT: 1;
     bool m_limitedNPOT: 1;
     bool m_virtualMachine: 1;
+    bool m_preferBufferSubData: 1;
     static GLPlatform *s_platform;
 };
 

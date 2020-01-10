@@ -29,9 +29,12 @@
 #include <KServiceTypeTrader>
 #include <KPluginInfo>
 
+#include <QtDBus/QDBusConnection>
+
 // Bundled actions:
 #include "actions/bundled/suspendsession.h"
 #include "actions/bundled/brightnesscontrol.h"
+#include "actions/bundled/keyboardbrightnesscontrol.h"
 #include "actions/bundled/dimdisplay.h"
 #include "actions/bundled/runscript.h"
 #include "actions/bundled/handlebuttonevents.h"
@@ -113,9 +116,35 @@ void ActionPool::init(PowerDevil::Core *parent)
     // Load bundled actions now
     m_actionPool.insert("SuspendSession", new BundledActions::SuspendSession(parent));
     m_actionPool.insert("BrightnessControl", new BundledActions::BrightnessControl(parent));
+    m_actionPool.insert("KeyboardBrightnessControl", new BundledActions::KeyboardBrightnessControl(parent));
     m_actionPool.insert("DimDisplay", new BundledActions::DimDisplay(parent));
     m_actionPool.insert("RunScript", new BundledActions::RunScript(parent));
     m_actionPool.insert("HandleButtonEvents", new BundledActions::HandleButtonEvents(parent));
+
+    // Verify support
+    QHash<QString,Action*>::iterator i = m_actionPool.begin();
+    while (i != m_actionPool.end()) {
+        Action *action = i.value();
+        if (!action->isSupported()) {
+            i = m_actionPool.erase(i);
+            action->deleteLater();
+        } else {
+            ++i;
+        }
+    }
+
+    // Register DBus objects
+    {
+        KService::List offers = KServiceTypeTrader::self()->query("PowerDevil/Action",
+                                                                "[X-KDE-PowerDevil-Action-RegistersDBusInterface] == TRUE");
+        foreach (KService::Ptr offer, offers) {
+            QString actionId = offer->property("X-KDE-PowerDevil-Action-ID", QVariant::String).toString();
+
+            if (m_actionPool.contains(actionId)) {
+                QDBusConnection::sessionBus().registerObject("/org/kde/Solid/PowerManagement/Actions/" + actionId, m_actionPool[actionId]);
+            }
+        }
+    }
 }
 
 Action* ActionPool::loadAction(const QString& actionId, const KConfigGroup& group, PowerDevil::Core *parent)

@@ -23,12 +23,12 @@
 #include <QHBoxLayout>
 #include <QRadioButton>
 
-#include <klocale.h>
+#include <KDE/KLocalizedString>
 
 class YesNoBox : public QWidget {
     Q_OBJECT
 public:
-    YesNoBox( QWidget *parent ) : QWidget(parent)
+    explicit YesNoBox( QWidget *parent ) : QWidget(parent)
     {
         QHBoxLayout *l = new QHBoxLayout(this);
         l->setContentsMargins(0, 0, 0, 0);

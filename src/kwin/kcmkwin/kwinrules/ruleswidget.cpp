@@ -25,9 +25,12 @@
 #include <kpushbutton.h>
 #include <QLabel>
 #include <kwindowsystem.h>
-#include <klocale.h>
+#include <KDE/KLocalizedString>
 #include <QRegExp>
+
+#ifdef KWIN_BUILD_ACTIVITIES
 #include <KActivities/Consumer>
+#endif
 
 #include <assert.h>
 #include <kmessagebox.h>
@@ -86,7 +89,9 @@ RulesWidget::RulesWidget(QWidget* parent)
     SETUP(size, set);
     SETUP(desktop, set);
     SETUP(screen, set);
+#ifdef KWIN_BUILD_ACTIVITIES
     SETUP(activity, set);
+#endif
     SETUP(maximizehoriz, set);
     SETUP(maximizevert, set);
     SETUP(minimize, set);
@@ -111,14 +116,13 @@ RulesWidget::RulesWidget(QWidget* parent)
     // workarounds tab
     SETUP(fsplevel, force);
     SETUP(type, force);
-    SETUP(ignoreposition, force);
+    SETUP(ignoregeometry, set);
     SETUP(minsize, force);
     SETUP(maxsize, force);
     SETUP(strictgeometry, force);
     SETUP(disableglobalshortcuts, force);
     SETUP(blockcompositing, force);
 
-    connect (machine_match, SIGNAL(currentIndexChanged(int)), SLOT(machineMatchChanged()));
     connect (shortcut_edit, SIGNAL(clicked()), SLOT(shortcutEditClicked()));
 
     edit_reg_wmclass->hide();
@@ -126,6 +130,11 @@ RulesWidget::RulesWidget(QWidget* parent)
     edit_reg_title->hide();
     edit_reg_machine->hide();
 
+#ifndef KWIN_BUILD_ACTIVITIES
+    rule_activity->hide();
+    enable_activity->hide();
+    activity->hide();
+#endif
     int i;
     for (i = 1;
             i <= KWindowSystem::numberOfDesktops();
@@ -133,11 +142,16 @@ RulesWidget::RulesWidget(QWidget* parent)
         desktop->addItem(QString::number(i).rightJustified(2) + ':' + KWindowSystem::desktopName(i));
     desktop->addItem(i18n("All Desktops"));
 
+#ifdef KWIN_BUILD_ACTIVITIES
     static KActivities::Consumer activities;
     foreach (const QString & activityId, activities.listActivities()) {
         activity->addItem(KActivities::Info::name(activityId), activityId);
     }
-    activity->addItem(i18n("All Activities"), QString::fromLatin1("ALL"));
+    // cloned from kactivities/src/lib/core/consumer.cpp
+    #define NULL_UUID "00000000-0000-0000-0000-000000000000"
+    activity->addItem(i18n("All Activities"), QString::fromLatin1(NULL_UUID));
+    #undef NULL_UUID
+#endif
 }
 
 #undef SETUP
@@ -154,7 +168,9 @@ UPDATE_ENABLE_SLOT(position)
 UPDATE_ENABLE_SLOT(size)
 UPDATE_ENABLE_SLOT(desktop)
 UPDATE_ENABLE_SLOT(screen)
+#ifdef KWIN_BUILD_ACTIVITIES
 UPDATE_ENABLE_SLOT(activity)
+#endif
 UPDATE_ENABLE_SLOT(maximizehoriz)
 UPDATE_ENABLE_SLOT(maximizevert)
 UPDATE_ENABLE_SLOT(minimize)
@@ -183,7 +199,7 @@ void RulesWidget::updateEnableshortcut()
 // workarounds tab
 UPDATE_ENABLE_SLOT(fsplevel)
 UPDATE_ENABLE_SLOT(type)
-UPDATE_ENABLE_SLOT(ignoreposition)
+UPDATE_ENABLE_SLOT(ignoregeometry)
 UPDATE_ENABLE_SLOT(minsize)
 UPDATE_ENABLE_SLOT(maxsize)
 UPDATE_ENABLE_SLOT(strictgeometry)
@@ -259,22 +275,6 @@ static QSize strToSize(const QString& str)
     return QSize(reg.cap(1).toInt(), reg.cap(2).toInt());
 }
 
-//used for opacity settings
-static QString intToStr(const int& s)
-{
-    if (s < 1 || s > 100)
-        return QString();
-    return QString::number(s);
-}
-
-static int strToInt(const QString& str)
-{
-    int tmp = str.toInt();
-    if (tmp < 1 || tmp > 100)
-        return 100;
-    return tmp;
-}
-
 int RulesWidget::desktopToCombo(int d) const
 {
     if (d >= 1 && d < desktop->count())
@@ -288,7 +288,7 @@ int RulesWidget::comboToDesktop(int val) const
         return NET::OnAllDesktops;
     return val + 1;
 }
-
+#ifdef KWIN_BUILD_ACTIVITIES
 int RulesWidget::activityToCombo(QString d) const
 {
     // TODO: ivan - do a multiselection list
@@ -309,7 +309,7 @@ QString RulesWidget::comboToActivity(int val) const
 
     return activity->itemData(val).toString();
 }
-
+#endif
 static int placementToCombo(Placement::Policy placement)
 {
     static const int conv[] = {
@@ -444,7 +444,9 @@ void RulesWidget::setRules(Rules* rules)
     LINEEDIT_SET_RULE(size, sizeToStr);
     COMBOBOX_SET_RULE(desktop, desktopToCombo);
     SPINBOX_SET_RULE(screen, inc);
+#ifdef KWIN_BUILD_ACTIVITIES
     COMBOBOX_SET_RULE(activity, activityToCombo);
+#endif
     CHECKBOX_SET_RULE(maximizehoriz,);
     CHECKBOX_SET_RULE(maximizevert,);
     CHECKBOX_SET_RULE(minimize,);
@@ -467,7 +469,7 @@ void RulesWidget::setRules(Rules* rules)
     LINEEDIT_SET_RULE(shortcut,);
     COMBOBOX_FORCE_RULE(fsplevel,);
     COMBOBOX_FORCE_RULE(type, typeToCombo);
-    CHECKBOX_FORCE_RULE(ignoreposition,);
+    CHECKBOX_SET_RULE(ignoregeometry,);
     LINEEDIT_FORCE_RULE(minsize, sizeToStr);
     LINEEDIT_FORCE_RULE(maxsize, sizeToStr);
     CHECKBOX_FORCE_RULE(strictgeometry,);
@@ -541,7 +543,9 @@ Rules* RulesWidget::rules() const
     LINEEDIT_SET_RULE(size, strToSize);
     COMBOBOX_SET_RULE(desktop, comboToDesktop);
     SPINBOX_SET_RULE(screen, dec);
+#ifdef KWIN_BUILD_ACTIVITIES
     COMBOBOX_SET_RULE(activity, comboToActivity);
+#endif
     CHECKBOX_SET_RULE(maximizehoriz,);
     CHECKBOX_SET_RULE(maximizevert,);
     CHECKBOX_SET_RULE(minimize,);
@@ -564,7 +568,7 @@ Rules* RulesWidget::rules() const
     LINEEDIT_SET_RULE(shortcut,);
     COMBOBOX_FORCE_RULE(fsplevel,);
     COMBOBOX_FORCE_RULE(type, comboToType);
-    CHECKBOX_FORCE_RULE(ignoreposition,);
+    CHECKBOX_SET_RULE(ignoregeometry,);
     LINEEDIT_FORCE_RULE(minsize, strToSize);
     LINEEDIT_FORCE_RULE(maxsize, strToSize);
     CHECKBOX_FORCE_RULE(strictgeometry,);
@@ -684,7 +688,7 @@ void RulesWidget::prefillUnusedValues(const KWindowInfo& info)
     //LINEEDIT_PREFILL( shortcut, );
     //COMBOBOX_PREFILL( fsplevel, );
     COMBOBOX_PREFILL(type, typeToCombo, info.windowType(SUPPORTED_MANAGED_WINDOW_TYPES_MASK));
-    //CHECKBOX_PREFILL( ignoreposition, );
+    //CHECKBOX_PREFILL( ignoregeometry, );
     LINEEDIT_PREFILL(minsize, sizeToStr, info.frameGeometry().size());
     LINEEDIT_PREFILL(maxsize, sizeToStr, info.frameGeometry().size());
     //CHECKBOX_PREFILL( strictgeometry, );
@@ -725,7 +729,7 @@ bool RulesWidget::finalCheck()
 
 void RulesWidget::prepareWindowSpecific(WId window)
 {
-    tabs->setCurrentIndex(2);   // geometry tab, skip tabs for window identification
+    tabs->setCurrentIndex(1);   // geometry tab, skip tab for window identification
     KWindowInfo info(window, -1U, -1U);   // read everything
     prefillUnusedValues(info);
 }

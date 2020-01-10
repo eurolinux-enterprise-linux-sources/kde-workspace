@@ -46,6 +46,10 @@ namespace KWin
 bool GLTexturePrivate::sNPOTTextureSupported = false;
 bool GLTexturePrivate::sFramebufferObjectSupported = false;
 bool GLTexturePrivate::sSaturationSupported = false;
+GLenum GLTexturePrivate::sTextureFormat = GL_RGBA; // custom dummy, GL_BGRA is not present on GLES
+uint GLTexturePrivate::s_textureObjectCounter = 0;
+uint GLTexturePrivate::s_fbo = 0;
+
 
 GLTexture::GLTexture()
     : d_ptr(new GLTexturePrivate())
@@ -91,12 +95,13 @@ GLTexture::GLTexture(int width, int height)
         d->m_size = QSize(width, height);
         d->m_canUseMipmaps = true;
 
+        d->updateMatrix();
+
         glGenTextures(1, &d->m_texture);
         bind();
 #ifdef KWIN_HAVE_OPENGLES
-        // format and internal format have to match in ES, GL_RGBA8 and GL_BGRA are not available
-        // see http://www.khronos.org/opengles/sdk/docs/man/xhtml/glTexImage2D.xml
-        glTexImage2D(d->m_target, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+        glTexImage2D(d->m_target, 0, GLTexturePrivate::sTextureFormat, width, height,
+                     0, GLTexturePrivate::sTextureFormat, GL_UNSIGNED_BYTE, 0);
 #else
         glTexImage2D(d->m_target, 0, GL_RGBA8, width, height, 0, GL_BGRA, GL_UNSIGNED_BYTE, 0);
 #endif
@@ -128,6 +133,7 @@ GLTexturePrivate::GLTexturePrivate()
     m_vbo = 0;
     m_filterChanged = true;
     m_wrapModeChanged = false;
+    ++s_textureObjectCounter;
 }
 
 GLTexturePrivate::~GLTexturePrivate()
@@ -138,6 +144,11 @@ GLTexturePrivate::~GLTexturePrivate()
     if (m_texture != 0) {
         glDeleteTextures(1, &m_texture);
     }
+    // Delete the FBO if this is the last Texture
+    if (--s_textureObjectCounter == 0 && s_fbo) {
+        glDeleteFramebuffers(1, &s_fbo);
+        s_fbo = 0;
+    }
 }
 
 void GLTexturePrivate::initStatic()
@@ -146,12 +157,17 @@ void GLTexturePrivate::initStatic()
     sNPOTTextureSupported = true;
     sFramebufferObjectSupported = true;
     sSaturationSupported = true;
+    if (hasGLExtension("GL_EXT_texture_format_BGRA8888"))
+        sTextureFormat = GL_BGRA_EXT;
+    else
+        sTextureFormat = GL_RGBA;
 #else
     sNPOTTextureSupported = hasGLExtension("GL_ARB_texture_non_power_of_two");
     sFramebufferObjectSupported = hasGLExtension("GL_EXT_framebuffer_object");
     sSaturationSupported = ((hasGLExtension("GL_ARB_texture_env_crossbar")
                              && hasGLExtension("GL_ARB_texture_env_dot3")) || hasGLVersion(1, 4))
                            && (glTextureUnitsCount >= 4) && glActiveTexture != NULL;
+    sTextureFormat = GL_BGRA;
 #endif
 }
 
@@ -199,6 +215,8 @@ bool GLTexture::load(const QImage& image, GLenum target)
     d->m_size = img.size();
     d->m_yInverted = true;
 
+    d->updateMatrix();
+
     img = d->convertToGLFormat(img);
 
     if (isNull()) {
@@ -206,9 +224,8 @@ bool GLTexture::load(const QImage& image, GLenum target)
     }
     bind();
 #ifdef KWIN_HAVE_OPENGLES
-    // format and internal format have to match in ES, GL_RGBA8 and GL_BGRA are not available
-    // see http://www.khronos.org/opengles/sdk/docs/man/xhtml/glTexImage2D.xml
-    glTexImage2D(d->m_target, 0, GL_RGBA, img.width(), img.height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, img.bits());
+    glTexImage2D(d->m_target, 0, GLTexturePrivate::sTextureFormat, img.width(), img.height(),
+                 0, GLTexturePrivate::sTextureFormat, GL_UNSIGNED_BYTE, img.bits());
 #else
     glTexImage2D(d->m_target, 0, GL_RGBA8, img.width(), img.height(), 0,
                  GL_BGRA, GL_UNSIGNED_BYTE, img.bits());
@@ -216,6 +233,47 @@ bool GLTexture::load(const QImage& image, GLenum target)
     unbind();
     setFilter(GL_LINEAR);
     return true;
+}
+
+void GLTexture::update(const QImage &image, const QPoint &offset, const QRect &src)
+{
+    if (image.isNull() || isNull())
+        return;
+
+    Q_D(GLTexture);
+#ifdef KWIN_HAVE_OPENGLES
+    static bool s_supportsUnpack = hasGLExtension("GL_EXT_unpack_subimage");
+#else
+    static bool s_supportsUnpack = true;
+#endif
+
+    int width = image.width();
+    int height = image.height();
+    QImage tmpImage;
+    if (!src.isNull()) {
+        if (s_supportsUnpack) {
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, image.width());
+            glPixelStorei(GL_UNPACK_SKIP_PIXELS, src.x());
+            glPixelStorei(GL_UNPACK_SKIP_ROWS, src.y());
+        } else {
+            tmpImage = image.copy(src);
+        }
+        width = src.width();
+        height = src.height();
+    }
+    const QImage &img = d->convertToGLFormat(tmpImage.isNull() ? image : tmpImage);
+
+    bind();
+    glTexSubImage2D(d->m_target, 0, offset.x(), offset.y(), width, height,
+                    GLTexturePrivate::sTextureFormat, GL_UNSIGNED_BYTE, img.bits());
+    checkGLError("update texture");
+    unbind();
+    setDirty();
+    if (!src.isNull() && s_supportsUnpack) {
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+        glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+    }
 }
 
 bool GLTexture::load(const QPixmap& pixmap, GLenum target)
@@ -277,10 +335,12 @@ void GLTexture::bind()
             glTexParameteri(d->m_target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(d->m_target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         }
+        d->m_filterChanged = false;
     }
     if (d->m_wrapModeChanged) {
         glTexParameteri(d->m_target, GL_TEXTURE_WRAP_S, d->m_wrapMode);
         glTexParameteri(d->m_target, GL_TEXTURE_WRAP_T, d->m_wrapMode);
+        d->m_wrapModeChanged = false;
     }
 }
 
@@ -367,6 +427,33 @@ GLenum GLTexture::filter() const
     return d->m_filter;
 }
 
+void GLTexture::clear()
+{
+    Q_D(GLTexture);
+    if (!GLTexturePrivate::s_fbo && GLRenderTarget::supported() &&
+        GLPlatform::instance()->driver() != Driver_Catalyst) // fail. -> bug #323065
+        glGenFramebuffers(1, &GLTexturePrivate::s_fbo);
+
+    if (GLTexturePrivate::s_fbo) {
+        // Clear the texture
+        glBindFramebuffer(GL_FRAMEBUFFER, GLTexturePrivate::s_fbo);
+        glClearColor(0, 0, 0, 0);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, d->m_texture, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    } else {
+        if (const int size = width()*height()) {
+            uint32_t *buffer = new uint32_t[size];
+            memset(buffer, 0, size*sizeof(uint32_t));
+            bind();
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width(), height(),
+                            GLTexturePrivate::sTextureFormat, GL_UNSIGNED_BYTE, buffer);
+            unbind();
+            delete[] buffer;
+        }
+    }
+}
+
 bool GLTexture::isDirty() const
 {
     Q_D(const GLTexture);
@@ -408,37 +495,36 @@ QImage GLTexturePrivate::convertToGLFormat(const QImage& img) const
 {
     // Copied from Qt's QGLWidget::convertToGLFormat()
     QImage res;
-#ifdef KWIN_HAVE_OPENGLES
-    res = QImage(img.size(), QImage::Format_ARGB32);
-    QImage imgARGB32 = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 
-    const int width = img.width();
-    const int height = img.height();
-    const uint32_t *p = (const uint32_t*) imgARGB32.scanLine(0);
-    uint32_t *q = (uint32_t*) res.scanLine(0);
+    if (sTextureFormat != GL_RGBA) {
+        if (QSysInfo::ByteOrder == QSysInfo::BigEndian) {
+            res = QImage(img.size(), QImage::Format_ARGB32);
+            QImage imgARGB32 = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 
-    if (QSysInfo::ByteOrder == QSysInfo::BigEndian) {
-        for (int i = 0; i < height; ++i) {
-            const uint32_t *end = p + width;
-            while (p < end) {
-                *q = (*p << 8) | ((*p >> 24) & 0xFF);
-                p++;
-                q++;
+            const int width = img.width();
+            const int height = img.height();
+            const uint32_t *p = (const uint32_t*) imgARGB32.scanLine(0);
+            uint32_t *q = (uint32_t*) res.scanLine(0);
+
+            // swizzle
+            for (int i = 0; i < height; ++i) {
+                const uint32_t *end = p + width;
+                while (p < end) {
+                    *q = ((*p << 24) & 0xff000000)
+                        | ((*p >> 24) & 0x000000ff)
+                        | ((*p << 8) & 0x00ff0000)
+                        | ((*p >> 8) & 0x0000ff00);
+                    p++;
+                    q++;
+                }
             }
+        } else if (img.format() != QImage::Format_ARGB32_Premultiplied) {
+            res = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        } else {
+            return img;
         }
     } else {
-        // GL_BGRA -> GL_RGBA
-        for (int i = 0; i < height; ++i) {
-            const uint32_t *end = p + width;
-            while (p < end) {
-                *q = ((*p << 16) & 0xff0000) | ((*p >> 16) & 0xff) | (*p & 0xff00ff00);
-                p++;
-                q++;
-            }
-        }
-    }
-#else
-    if (QSysInfo::ByteOrder == QSysInfo::BigEndian) {
+#ifdef KWIN_HAVE_OPENGLES
         res = QImage(img.size(), QImage::Format_ARGB32);
         QImage imgARGB32 = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
 
@@ -447,23 +533,50 @@ QImage GLTexturePrivate::convertToGLFormat(const QImage& img) const
         const uint32_t *p = (const uint32_t*) imgARGB32.scanLine(0);
         uint32_t *q = (uint32_t*) res.scanLine(0);
 
-        // swizzle
-        for (int i = 0; i < height; ++i) {
-            const uint32_t *end = p + width;
-            while (p < end) {
-                *q = ((*p << 24) & 0xff000000)
-                     | ((*p >> 24) & 0x000000ff)
-                     | ((*p << 8) & 0x00ff0000)
-                     | ((*p >> 8) & 0x0000ff00);
-                p++;
-                q++;
+        if (QSysInfo::ByteOrder == QSysInfo::BigEndian) {
+            for (int i = 0; i < height; ++i) {
+                const uint32_t *end = p + width;
+                while (p < end) {
+                    *q = (*p << 8) | ((*p >> 24) & 0xFF);
+                    p++;
+                    q++;
+                }
+            }
+        } else {
+            // GL_BGRA -> GL_RGBA
+            for (int i = 0; i < height; ++i) {
+                const uint32_t *end = p + width;
+                while (p < end) {
+                    *q = ((*p << 16) & 0xff0000) | ((*p >> 16) & 0xff) | (*p & 0xff00ff00);
+                    p++;
+                    q++;
+                }
             }
         }
-    } else {
-        res = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    }
 #endif
+    }
     return res;
+}
+
+void GLTexturePrivate::updateMatrix()
+{
+    m_matrix[NormalizedCoordinates].setToIdentity();
+    m_matrix[UnnormalizedCoordinates].setToIdentity();
+
+#ifndef KWIN_HAVE_OPENGLES
+    if (m_target == GL_TEXTURE_RECTANGLE_ARB)
+        m_matrix[NormalizedCoordinates].scale(m_size.width(), m_size.height());
+    else
+#endif
+        m_matrix[UnnormalizedCoordinates].scale(1.0 / m_size.width(), 1.0 / m_size.height());
+
+    if (!m_yInverted) {
+        m_matrix[NormalizedCoordinates].translate(0.0, 1.0);
+        m_matrix[NormalizedCoordinates].scale(1.0, -1.0);
+
+        m_matrix[UnnormalizedCoordinates].translate(0.0, m_size.height());
+        m_matrix[UnnormalizedCoordinates].scale(1.0, -1.0);
+    }
 }
 
 bool GLTexture::isYInverted() const
@@ -476,6 +589,7 @@ void GLTexture::setYInverted(bool inverted)
 {
     Q_D(GLTexture);
     d->m_yInverted = inverted;
+    d->updateMatrix();
 }
 
 int GLTexture::width() const
@@ -488,6 +602,12 @@ int GLTexture::height() const
 {
     Q_D(const GLTexture);
     return d->m_size.height();
+}
+
+QMatrix4x4 GLTexture::matrix(TextureCoordinateType type) const
+{
+    Q_D(const GLTexture);
+    return d->m_matrix[type];
 }
 
 bool GLTexture::NPOTTextureSupported()

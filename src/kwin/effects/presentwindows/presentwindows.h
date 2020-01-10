@@ -26,36 +26,27 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <kwineffects.h>
 #include <kshortcut.h>
-#include <QtGui/QGraphicsView>
+#include <QDeclarativeView>
 
 class QTimer;
-namespace Plasma
-{
-class PushButton;
-class FrameSvg;
-}
 
 namespace KWin
 {
-
-class CloseWindowView : public QGraphicsView
+class CloseWindowView : public QDeclarativeView
 {
     Q_OBJECT
 public:
-    CloseWindowView(QWidget* parent = 0);
+    explicit CloseWindowView(QWidget *parent = 0);
     void windowInputMouseEvent(QMouseEvent* e);
-    virtual void drawBackground(QPainter* painter, const QRectF& rect);
-
     void disarm();
-public slots:
-    void arm();
 
 Q_SIGNALS:
     void close();
 
+protected:
+    void hideEvent(QHideEvent *event);
+
 private:
-    Plasma::PushButton* m_closeButton;
-    Plasma::FrameSvg* m_frame;
     QTimer* m_armTimer;
 };
 
@@ -119,7 +110,7 @@ public:
 
     // User interaction
     virtual bool borderActivated(ElectricBorder border);
-    virtual void windowInputMouseEvent(Window w, QEvent *e);
+    virtual void windowInputMouseEvent(QEvent *e);
     virtual void grabbedKeyboardEvent(QKeyEvent *e);
     virtual bool isActive() const;
 
@@ -137,8 +128,7 @@ public:
         WindowExitAction = 2, // Deactivates the effect without activating new window
         WindowToCurrentDesktopAction = 3, // Brings window to current desktop
         WindowToAllDesktopsAction = 4, // Brings window to all desktops
-        WindowMinimizeAction = 5, // Minimize the window
-        WindowCloseAction = 6 // Closes the window
+        WindowMinimizeAction = 5 // Minimize the window
     };
     enum DesktopMouseAction {
         DesktopNoAction = 0, // nothing
@@ -286,13 +276,13 @@ private:
     bool m_activated;
     bool m_ignoreMinimized;
     double m_decalOpacity;
-    Window m_input;
     bool m_hasKeyboardGrab;
     PresentWindowsMode m_mode;
     int m_desktop;
     EffectWindowList m_selectedWindows;
     EffectWindow *m_managerWindow;
     QString m_class;
+    bool m_needInitialSelection;
 
     // Window data
     WindowMotionManager m_motionManager;

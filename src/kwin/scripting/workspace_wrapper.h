@@ -22,9 +22,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef KWIN_SCRIPTING_WORKSPACE_WRAPPER_H
 #define KWIN_SCRIPTING_WORKSPACE_WRAPPER_H
 
-#include <QtCore/QObject>
-#include <QtCore/QSize>
-#include <QtCore/QStringList>
+#include <QObject>
+#include <QSize>
+#include <QStringList>
+#include <QRect>
 #include <kwinglobals.h>
 
 namespace KWin
@@ -40,9 +41,9 @@ class WorkspaceWrapper : public QObject
     Q_PROPERTY(int currentDesktop READ currentDesktop WRITE setCurrentDesktop NOTIFY currentDesktopChanged)
     Q_PROPERTY(KWin::Client *activeClient READ activeClient WRITE setActiveClient NOTIFY clientActivated)
     // TODO: write and notify?
-    Q_PROPERTY(QSize desktopGridSize READ desktopGridSize)
-    Q_PROPERTY(int desktopGridWidth READ desktopGridWidth)
-    Q_PROPERTY(int desktopGridHeight READ desktopGridHeight)
+    Q_PROPERTY(QSize desktopGridSize READ desktopGridSize NOTIFY desktopLayoutChanged)
+    Q_PROPERTY(int desktopGridWidth READ desktopGridWidth NOTIFY desktopLayoutChanged)
+    Q_PROPERTY(int desktopGridHeight READ desktopGridHeight NOTIFY desktopLayoutChanged)
     Q_PROPERTY(int workspaceWidth READ workspaceWidth)
     Q_PROPERTY(int workspaceHeight READ workspaceHeight)
     Q_PROPERTY(QSize workspaceSize READ workspaceSize)
@@ -89,7 +90,13 @@ signals:
      * To get the current number of desktops use the property desktops.
      * @param oldNumberOfDesktops The previous number of desktops.
      **/
-    void numberDesktopsChanged(int oldNumberOfDesktops);
+    void numberDesktopsChanged(uint oldNumberOfDesktops);
+    /**
+     * Signal emitted whenever the layout of virtual desktops changed.
+     * That is desktopGrid(Size/Width/Height) will have new values.
+     * @since 4.11
+     **/
+    void desktopLayoutChanged();
     /**
      * The demands attention state for Client @p c changed to @p set.
      * @param c The Client for which demands attention changed
@@ -163,7 +170,7 @@ public:
         ElectricNone
     };
 
-    WorkspaceWrapper(QObject* parent = 0);
+    explicit WorkspaceWrapper(QObject* parent = 0);
 #define GETTERSETTERDEF( rettype, getter, setter ) \
 rettype getter() const; \
 void setter( rettype val );

@@ -580,7 +580,7 @@ void Pager::recalculateWindowRects()
         unsigned long properties[] = { 0, NET::WM2Activities };
         NETWinInfo netInfo(QX11Info::display(), window, QX11Info::appRootWindow(), properties, 2);
         QString result(netInfo.activities());
-        if (!result.isEmpty() && result != "ALL") {
+        if (!result.isEmpty() && result != "00000000-0000-0000-0000-000000000000") {
             QStringList activities = result.split(',');
             if (!activities.contains(m_currentActivity)) {
                 continue;
@@ -840,8 +840,9 @@ void Pager::updateToolTip(int hoverDesktopId)
     int taskCounter = 0;
     int displayedTaskCounter = 0;
     WindowModel *windows = m_pagerModel->windowsAt(hoverDesktopId);
+    const int windowCount = windows ? windows->rowCount() : 0;
 
-    for (; taskCounter < windows->rowCount(); taskCounter++) {
+    for (; taskCounter < windowCount; taskCounter++) {
         WId id = windows->idAt(taskCounter);
         QString visibleName = windows->visibleNameAt(taskCounter);
 

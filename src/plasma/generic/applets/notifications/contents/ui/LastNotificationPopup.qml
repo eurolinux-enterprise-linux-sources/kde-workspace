@@ -188,11 +188,12 @@ PlasmaCore.Dialog {
                     anchors {
                         left: appIconItem.y > y + height ? parent.left : appIconItem.right
                         right: parent.right
-                        rightMargin: closeButton.width
+                        rightMargin: settingsButton.visible ? settingsButton.width + closeButton.width : closeButton.width
                         top: parent.top
                         topMargin: 6
                         leftMargin: 6
                     }
+                    onLinkActivated: plasmoid.openUrl(link)
                 }
 
                 QIconItem {
@@ -212,6 +213,7 @@ PlasmaCore.Dialog {
                     anchors.fill: appIconItem
                     image: model.image
                     smooth: true
+                    fillMode: Image.PreserveAspectFit
                     visible: nativeWidth > 0
                 }
                /*
@@ -241,6 +243,7 @@ PlasmaCore.Dialog {
                         wrapMode: Text.Wrap
                         elide: Text.ElideRight
                         maximumLineCount: 4
+                        onLinkActivated: plasmoid.openUrl(link)
                     }
                 }
                 Column {
@@ -339,7 +342,32 @@ PlasmaCore.Dialog {
             onClicked: {
                 lastNotificationPopup.visible = false
                 lastNotificationTimer.running = false
+                closeNotification(notificationsModel.get((notificationsView.count-1)-notificationsView.currentIndex).source)
                 notificationsModel.remove((notificationsView.count-1)-notificationsView.currentIndex)
+            }
+        }
+        PlasmaComponents.ToolButton {
+            id: settingsButton
+            opacity: 0
+            iconSource: "configure"
+            width: theme.smallMediumIconSize
+            height: width
+            visible: notificationsModel.get((notificationsView.count-1)-notificationsView.currentIndex).configurable
+            anchors {
+                right: closeButton.left
+                top: parent.top
+                rightMargin: 5
+            }
+            onPressedChanged: {
+                if (pressed) {
+                    mainItem.buttonPressed = true
+                } else {
+                    mainItem.buttonPressed = false
+                }
+            }
+            onClicked: {
+                lastNotificationPopup.visible = false
+                configureNotification(notificationsModel.get((notificationsView.count-1)-notificationsView.currentIndex).appRealName)
             }
         }
         states: [
@@ -353,6 +381,10 @@ PlasmaCore.Dialog {
                     target: closeButton
                     opacity: 1
                 }
+                PropertyChanges {
+                    target: settingsButton
+                    opacity: 1
+                }
             },
             State {
                 name: "controlsHidden"
@@ -362,6 +394,10 @@ PlasmaCore.Dialog {
                 }
                 PropertyChanges {
                     target: closeButton
+                    opacity: 0
+                }
+                PropertyChanges {
+                    target: settingsButton
                     opacity: 0
                 }
             }

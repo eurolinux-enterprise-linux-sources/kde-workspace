@@ -49,6 +49,7 @@ Interface::Interface(KSldApp *parent)
     (void) new KScreenSaverAdaptor( this );
     QDBusConnection::sessionBus().registerService(QLatin1String("org.kde.screensaver"));
     QDBusConnection::sessionBus().registerObject(QLatin1String("/ScreenSaver"), this);
+    QDBusConnection::sessionBus().registerObject(QLatin1String("/org/freedesktop/ScreenSaver"), this);
     connect(m_daemon, SIGNAL(locked()), SLOT(slotLocked()));
     connect(m_daemon, SIGNAL(unlocked()), SLOT(slotUnlocked()));
 
@@ -85,7 +86,7 @@ Interface::~Interface()
 
 bool Interface::GetActive()
 {
-    return m_daemon->isLocked();
+    return m_daemon->lockState() == KSldApp::Locked;
 }
 
 uint Interface::GetActiveTime()
@@ -100,7 +101,12 @@ uint Interface::GetSessionIdleTime()
 
 void Interface::Lock()
 {
-    m_daemon->lock();
+    m_daemon->lock(calledFromDBus());
+
+    if (calledFromDBus() && m_daemon->lockState() == KSldApp::AcquiringLock) {
+        m_lockReplies << message().createReply();
+        setDelayedReply(true);
+    }
 }
 
 bool Interface::SetActive (bool state)
@@ -182,11 +188,13 @@ void Interface::UnThrottle(uint cookie)
 
 void Interface::slotLocked()
 {
+    sendLockReplies();
     emit ActiveChanged(true);
 }
 
 void Interface::slotUnlocked()
 {
+    sendLockReplies();
     emit ActiveChanged(false);
 }
 
@@ -210,6 +218,15 @@ void Interface::setupPlasma()
 void Interface::saverLockReady()
 {
     // unused
+}
+
+void Interface::sendLockReplies()
+{
+    foreach (const QDBusMessage &reply, m_lockReplies) {
+        QDBusConnection::sessionBus().send(reply);
+    }
+
+    m_lockReplies.clear();
 }
 
 } // namespace

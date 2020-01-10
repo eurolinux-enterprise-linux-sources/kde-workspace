@@ -1,5 +1,5 @@
 /*
- * Copyright 2009-2010 Hugo Pereira Da Costa <hugo@oxygen-icons.org>
+ * Copyright 2009-2010 Hugo Pereira Da Costa <hugo.pereira@free.fr>
  * Copyright 2008 Long Huynh Huu <long.upcase@googlemail.com>
  * Copyright 2007 Matthew Woehlke <mw_triad@users.sourceforge.net>
  * Copyright 2007 Casper Boemann <cbr@boemann.dk>
@@ -532,7 +532,7 @@ namespace Oxygen
         QColor* out( _decoColorCache.object( key ) );
         if( !out )
         {
-            out = new QColor( KColorUtils::mix( background, color, 0.4 + 0.8*_contrast ) );
+            out = new QColor( KColorUtils::mix( background, color, 0.8*(1.0 + _contrast ) ) );
             _decoColorCache.insert( key, out );
         }
 

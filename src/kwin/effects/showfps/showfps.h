@@ -21,7 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef KWIN_SHOWFPS_H
 #define KWIN_SHOWFPS_H
 
-#include <QtCore/QTime>
+#include <QTime>
 
 #include <kwineffects.h>
 
@@ -80,7 +80,7 @@ private:
     void paintFPSGraph(int x, int y);
     void paintDrawSizeGraph(int x, int y);
     void paintGraph(int x, int y, QList<int> values, QList<int> lines, bool colorize);
-    void paintFPSText(int fps);
+    QImage fpsTextImage(int fps);
     QTime t;
     enum { NUM_PAINTS = 100 }; // remember time needed to paint this many paints
     int paints[ NUM_PAINTS ]; // time needed to paint
@@ -93,12 +93,13 @@ private:
     int x;
     int y;
     QRect fps_rect;
-    GLTexture *fpsText;
+    QScopedPointer<GLTexture> fpsText;
     int textPosition;
     QFont textFont;
     QColor textColor;
     QRect fpsTextRect;
     int textAlign;
+    QScopedPointer<EffectFrame> m_noBenchmark;
 };
 
 } // namespace

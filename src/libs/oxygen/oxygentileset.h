@@ -2,7 +2,7 @@
 #define oxygentileset_h
 
 /*
- * Copyright 2009-2010 Hugo Pereira Da Costa <hugo@oxygen-icons.org>
+ * Copyright 2009-2010 Hugo Pereira Da Costa <hugo.pereira@free.fr>
  * Copyright 2008 Long Huynh Huu <long.upcase@googlemail.com>
  * Copyright 2007 Matthew Woehlke <mw_triad@users.sourceforge.net>
  *
@@ -111,7 +111,7 @@ namespace Oxygen
 
         //! is valid
         bool isValid( void ) const
-        { return size().isValid() && _pixmaps.size() == 9; }
+        { return _pixmaps.size() == 9; }
 
         //! save all pixmaps
         /*! pixmap names will be \p basename-position.suffix. Other arguments are the same as for QPixmap::save */

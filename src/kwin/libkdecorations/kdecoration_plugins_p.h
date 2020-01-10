@@ -32,7 +32,7 @@ DEALINGS IN THE SOFTWARE.
 
 // This private header is used by KWin core.
 
-#include <QtGui/QWidget>
+#include <QWidget>
 #include <ksharedconfig.h>
 
 #include "kdecoration.h"
@@ -46,7 +46,7 @@ class KWIN_EXPORT KDecorationPlugins
     : public KDecorationProvides
 {
 public:
-    KDecorationPlugins(const KSharedConfigPtr &cfg);
+    explicit KDecorationPlugins(const KSharedConfigPtr &cfg);
     virtual ~KDecorationPlugins();
     /** Whether the plugin with @p name can be loaded
      * if @p loadedLib is passed, the library is NOT unloaded and freed
@@ -55,6 +55,7 @@ public:
     bool loadPlugin(QString name);
     void destroyPreviousPlugin();
     KDecorationFactory* factory();
+    const KDecorationFactory* factory() const;
     KDecoration* createDecoration(KDecorationBridge*);
     QString currentPlugin();
     bool reset(unsigned long changed);   // returns true if decorations need to be recreated

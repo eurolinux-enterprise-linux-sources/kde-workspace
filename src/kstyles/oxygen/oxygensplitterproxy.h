@@ -6,7 +6,7 @@
 // Extended hit area for Splitters
 // -------------------
 //
-// Copyright (C) 2011 Hugo Pereira Da Costa <hugo@oxygen-icons.org>
+// Copyright (C) 2011 Hugo Pereira Da Costa <hugo.pereira@free.fr>
 //
 // Based on Bespin splitterproxy code
 // Copyright (C) 2011 Thomas Luebking <thomas.luebking@web.de>
@@ -50,7 +50,7 @@ namespace Oxygen
         public:
 
         //! constructor
-        SplitterFactory( QObject* parent ):
+        explicit SplitterFactory( QObject* parent ):
             QObject( parent ),
             _enabled( false )
             {}
@@ -92,7 +92,7 @@ namespace Oxygen
         public:
 
         //! constructor
-        SplitterProxy( QWidget*, bool = false );
+        explicit SplitterProxy( QWidget*, bool = false );
 
         //! destructor
         virtual ~SplitterProxy( void );

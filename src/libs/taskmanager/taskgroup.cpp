@@ -83,7 +83,6 @@ TaskGroup::TaskGroup(GroupManager *parent)
 TaskGroup::~TaskGroup()
 {
     emit destroyed(this);
-    //kDebug() << name();
     delete d;
 }
 
@@ -106,7 +105,7 @@ WindowList TaskGroup::directMemberwinIds() const
 {
     WindowList ids;
     foreach (AbstractGroupableItem * groupable, d->members) {
-        if (!groupable->itemType() == GroupItemType) {
+        if (groupable->itemType() != GroupItemType) {
             ids += groupable->winIds();
         }
     }
@@ -127,6 +126,24 @@ AbstractGroupableItem *TaskGroup::getMemberByWId(WId id)
             }
             if (groupable->winIds().values().first() == id) {
                 return groupable;
+            }
+        }
+    }
+    //kDebug() << "item not found";
+    return 0;
+}
+
+AbstractGroupableItem *TaskGroup::getMemberById(int id)
+{
+    foreach (AbstractGroupableItem * groupable, d->members) {
+        if (groupable->id() == id) {
+            return groupable;
+        } else {
+            if (groupable->itemType() == GroupItemType) {
+                AbstractGroupableItem *item = static_cast<TaskGroup*>(groupable)->getMemberById(id);
+                if (item) {
+                    return item;
+                }
             }
         }
     }
@@ -192,9 +209,15 @@ void TaskGroup::add(AbstractGroupableItem *item, int insertIndex)
         index = d->members.count();
         if (d->groupManager->separateLaunchers()) {
             if (item->itemType() == LauncherItemType) {
-                // insert launchers together at the head of the list, but still
-                // in the order they appear
-                for (index = 0; index < d->members.count(); ++index) {
+                KUrl lUrl = item->launcherUrl();
+
+                int maxIndex = d->groupManager->launcherIndex(lUrl);
+
+                if (maxIndex < 0 || maxIndex >= d->members.count()) {
+                    maxIndex = d->members.count() - 1;
+                }
+
+                for (index = 0; index < maxIndex; ++index) {
                     if (d->members.at(index)->itemType() != LauncherItemType) {
                         break;
                     }
@@ -308,6 +331,7 @@ void TaskGroup::remove(AbstractGroupableItem *item)
         kDebug() << "empty";
         emit empty(this);
     }*/
+
     emit itemRemoved(item);
 }
 

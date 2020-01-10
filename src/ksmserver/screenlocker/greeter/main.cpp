@@ -20,11 +20,37 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <KDE/KCmdLineArgs>
 #include <KDE/KLocale>
 #include <KDE/KGlobal>
+#include <QDateTime>
+
+#include <iostream>
+
+#include <signal.h>
 
 #include "greeterapp.h"
 
 static const char description[] = I18N_NOOP( "Greeter for the KDE Plasma Workspaces Screen locker" );
 static const char version[] = "0.1";
+
+static void signalHandler(int signum)
+{
+    ScreenLocker::UnlockApp *instance = static_cast<ScreenLocker::UnlockApp *>(qApp);
+
+    if (!instance)
+        return;
+
+    switch(signum)
+    {
+      case SIGTERM:
+        // exit gracefully to not leave behind screensaver processes (bug#224200)
+        // return exit code 1 to indicate that a valid password was not entered,
+        // to prevent circumventing the password input by sending a SIGTERM
+        instance->exit(1);
+        break;
+      case SIGUSR1:
+        instance->lockImmediately();
+        break;
+    }
+}
 
 int main(int argc, char* argv[])
 {
@@ -53,6 +79,7 @@ int main(int argc, char* argv[])
     KCmdLineArgs::init(argc, argv, &aboutData);
     KCmdLineOptions options;
     options.add("testing", ki18n("Starts the greeter in testing mode"));
+    options.add("immediateLock", ki18n("Lock immediately, ignoring any grace time etc."));
     KCmdLineArgs::addCmdLineOptions(options);
 
     ScreenLocker::UnlockApp app;
@@ -61,7 +88,22 @@ int main(int argc, char* argv[])
     KCmdLineArgs *args = KCmdLineArgs::parsedArgs();
     if (args->isSet("testing")) {
         app.setTesting(true);
+        app.setImmediateLock(true);
+    } else {
+        app.setImmediateLock(args->isSet("immediateLock"));
     }
     args->clear();
+    app.desktopResized();
+
+    // This allow ksmserver to know when the applicaion has actually finished setting itself up.
+    // Crucial for blocking until it is ready, ensuring locking happens before sleep, e.g.
+    std::cout << "Locked at " << QDateTime::currentDateTime().toTime_t() << std::endl;
+
+    struct sigaction sa;
+    sa.sa_handler = signalHandler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGUSR1, &sa, NULL);
     return app.exec();
 }

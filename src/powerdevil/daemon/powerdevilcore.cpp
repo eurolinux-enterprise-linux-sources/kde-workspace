@@ -28,12 +28,12 @@
 #include "powerdevilpolicyagent.h"
 #include "powerdevilprofilegenerator.h"
 
+#include "daemon/actions/bundled/suspendsession.h"
+
 #include <Solid/Battery>
 #include <Solid/Device>
 #include <Solid/DeviceNotifier>
 
-#include <KAction>
-#include <KActionCollection>
 #include <KDebug>
 #include <KIdleTime>
 #include <KLocalizedString>
@@ -57,6 +57,7 @@ Core::Core(QObject* parent, const KComponentData &componentData)
     , m_applicationData(componentData)
     , m_criticalBatteryTimer(new QTimer(this))
     , m_activityConsumer(new KActivities::Consumer(this))
+    , m_pendingWakeupEvent(true)
 {
 }
 
@@ -121,8 +122,6 @@ void Core::onBackendReady()
         }
     }
 
-    connect(m_backend, SIGNAL(brightnessChanged(float,PowerDevil::BackendInterface::BrightnessControlType)),
-            this, SLOT(onBrightnessChanged(float)));
     connect(m_backend, SIGNAL(acAdapterStateChanged(PowerDevil::BackendInterface::AcAdapterState)),
             this, SLOT(onAcAdapterStateChanged(PowerDevil::BackendInterface::AcAdapterState)));
     connect(m_backend, SIGNAL(batteryRemainingTimeChanged(qulonglong)),
@@ -136,9 +135,6 @@ void Core::onBackendReady()
 
     // Set up the policy agent
     PowerDevil::PolicyAgent::instance()->init();
-
-    connect(m_backend, SIGNAL(resumeFromSuspend()),
-            this, SLOT(onResumeFromSuspend()));
 
     // Initialize the action pool, which will also load the needed startup actions.
     PowerDevil::ActionPool::instance()->init(this);
@@ -154,33 +150,16 @@ void Core::onBackendReady()
     // All systems up Houston, let's go!
     emit coreReady();
     refreshStatus();
+}
 
-    KActionCollection* actionCollection = new KActionCollection( this );
-
-    KAction* globalAction = actionCollection->addAction("Increase Screen Brightness");
-    globalAction->setText(i18nc("Global shortcut", "Increase Screen Brightness"));
-    globalAction->setGlobalShortcut(KShortcut(Qt::Key_MonBrightnessUp));
-    connect(globalAction, SIGNAL(triggered(bool)), SLOT(increaseBrightness()));
-
-    globalAction = actionCollection->addAction("Decrease Screen Brightness");
-    globalAction->setText(i18nc("Global shortcut", "Decrease Screen Brightness"));
-    globalAction->setGlobalShortcut(KShortcut(Qt::Key_MonBrightnessDown));
-    connect(globalAction, SIGNAL(triggered(bool)), SLOT(decreaseBrightness()));
-
-    globalAction = actionCollection->addAction("Sleep");
-    globalAction->setText(i18nc("Global shortcut", "Sleep"));
-    globalAction->setGlobalShortcut(KShortcut(Qt::Key_Sleep));
-    connect(globalAction, SIGNAL(triggered(bool)), SLOT(suspendToRam()));
-
-    globalAction = actionCollection->addAction("Hibernate");
-    globalAction->setText(i18nc("Global shortcut", "Hibernate"));
-    globalAction->setGlobalShortcut(KShortcut(Qt::Key_Hibernate));
-    connect(globalAction, SIGNAL(triggered(bool)), SLOT(suspendToDisk()));
-
-    globalAction = actionCollection->addAction("PowerOff");
-    //globalAction->setText(i18nc("Global shortcut", "Power Off button"));
-    globalAction->setGlobalShortcut(KShortcut(Qt::Key_PowerOff));
-    connect(globalAction, SIGNAL(triggered(bool)), SLOT(powerOffButtonTriggered()));
+bool Core::isActionSupported(const QString& actionName)
+{
+    Action *action = ActionPool::instance()->loadAction(actionName, KConfigGroup(), this);
+    if (!action) {
+        return false;
+    } else {
+        return action->isSupported();
+    }
 }
 
 QString Core::checkBatteryStatus(bool notify)
@@ -356,6 +335,7 @@ void Core::loadProfile(bool force)
         // Do we need to force a wakeup?
         if (m_pendingWakeupEvent) {
             // Fake activity at this stage, when no timeouts are registered
+            onResumingFromIdle();
             KIdleTime::instance()->simulateUserActivity();
             m_pendingWakeupEvent = false;
         }
@@ -366,6 +346,7 @@ void Core::loadProfile(bool force)
         // Do we need to force a wakeup?
         if (m_pendingWakeupEvent) {
             // Fake activity at this stage, when no timeouts are registered
+            onResumingFromIdle();
             KIdleTime::instance()->simulateUserActivity();
             m_pendingWakeupEvent = false;
         }
@@ -377,17 +358,16 @@ void Core::loadProfile(bool force)
                 action->onProfileLoad();
             } else {
                 // Ouch, error. But let's just warn and move on anyway
-                emitNotification("powerdevilerror", i18n("The profile \"%1\" tried to activate %2, "
-                                "a non existent action. This is usually due to an installation problem"
-                                " or to a configuration problem.",
-                                profileId, actionName));
+                //TODO Maybe Remove from the configuration if unsupported
+                kWarning() << "The profile " << profileId <<  "tried to activate"
+                                << actionName << "a non existent action. This is usually due to an installation problem"
+                                " or to a configuration problem. or simlpy the action is not supported";
             }
         }
 
         // We are now on a different profile
         m_currentProfile = profileId;
         emit profileChanged(m_currentProfile);
-        emit brightnessChanged(brightness());
     }
 
     // Now... any special behaviors we'd like to consider?
@@ -452,6 +432,12 @@ void Core::onDeviceAdded(const QString& udi)
         return;
     }
 
+    if (!b->isPowerSupply()) {
+        // TODO: At some later point it would be really nice to handle those batteries too
+        // eg, show "your mouse is running low", but in the mean time, we don't care about those
+        return;
+    }
+
     if (!connect(b, SIGNAL(chargePercentChanged(int,QString)),
                  this, SLOT(onBatteryChargePercentChanged(int,QString))) ||
         !connect(b, SIGNAL(chargeStateChanged(int,QString)),
@@ -470,8 +456,20 @@ void Core::onDeviceAdded(const QString& udi)
     }
     m_loadedBatteriesUdi.append(udi);
 
+    // Compute the current global percentage
+    int globalChargePercent = 0;
+    for (QHash<QString,int>::const_iterator i = m_batteriesPercent.constBegin(); i != m_batteriesPercent.constEnd(); ++i) {
+        globalChargePercent += i.value();
+    }
+
+    // If a new battery has been added, let's clear some pending suspend actions if the new global batteries percentage is
+    // higher than the battery low level. (See bug 329537)
+    if (m_criticalBatteryTimer->isActive() && globalChargePercent > PowerDevilSettings::batteryCriticalLevel()) {
+        m_criticalBatteryTimer->stop();
+    }
+
     // So we get a "Battery is low" notification directly on system startup if applicable
-    emitBatteryChargePercentNotification(b->chargePercent(), 100);
+    emitBatteryChargePercentNotification(globalChargePercent, 100);
 }
 
 void Core::onDeviceRemoved(const QString& udi)
@@ -523,17 +521,17 @@ bool Core::emitBatteryChargePercentNotification(int currentPercent, int previous
     if (currentPercent <= PowerDevilSettings::batteryCriticalLevel() &&
         previousPercent > PowerDevilSettings::batteryCriticalLevel()) {
         switch (PowerDevilSettings::batteryCriticalAction()) {
-        case 3:
+        case PowerDevil::BundledActions::SuspendSession::ShutdownMode:
             emitRichNotification("criticalbattery", i18n("Battery Critical (%1% Remaining)", currentPercent),
                              i18n("Your battery level is critical, the computer will be halted in 30 seconds."));
             m_criticalBatteryTimer->start();
             break;
-        case 2:
+        case PowerDevil::BundledActions::SuspendSession::ToDiskMode:
             emitRichNotification("criticalbattery", i18n("Battery Critical (%1% Remaining)", currentPercent),
                              i18n("Your battery level is critical, the computer will be hibernated in 30 seconds."));
             m_criticalBatteryTimer->start();
             break;
-        case 1:
+        case PowerDevil::BundledActions::SuspendSession::ToRamMode:
             emitRichNotification("criticalbattery", i18n("Battery Critical (%1% Remaining)", currentPercent),
                              i18n("Your battery level is critical, the computer will be suspended in 30 seconds."));
             m_criticalBatteryTimer->start();
@@ -607,25 +605,27 @@ void Core::onBatteryChargeStateChanged(int state, const QString &udi)
 {
     bool previousCharged = true;
     for (QHash<QString,bool>::const_iterator i = m_batteriesCharged.constBegin(); i != m_batteriesCharged.constEnd(); ++i) {
-        if (i.value() != Solid::Battery::NoCharge) {
+        if (!i.value()) {
             previousCharged = false;
             break;
         }
     }
 
-    bool currentCharged = previousCharged;
-    if (state != Solid::Battery::NoCharge) {
-        currentCharged = false;
-        m_batteriesCharged[udi] = false;
-    } else {
-        m_batteriesCharged[udi] = true;
-    }
+    m_batteriesCharged[udi] = (state == Solid::Battery::NoCharge);
 
     if (m_backend->acAdapterState() != BackendInterface::Plugged) {
         return;
     }
 
-    if (previousCharged == false && currentCharged == true) {
+    bool currentCharged = true;
+    for (QHash<QString,bool>::const_iterator i = m_batteriesCharged.constBegin(); i != m_batteriesCharged.constEnd(); ++i) {
+        if (!i.value()) {
+            currentCharged = false;
+            break;
+        }
+    }
+
+    if (!previousCharged && currentCharged) {
         emitRichNotification("fullbattery", i18n("Charge Complete"), i18n("Your battery is now fully charged."));
         refreshStatus();
     }
@@ -649,23 +649,6 @@ void Core::onCriticalBatteryTimerExpired()
 void Core::onBatteryRemainingTimeChanged(qulonglong time)
 {
     emit batteryRemainingTimeChanged(time);
-}
-
-void Core::onBrightnessChanged(float brightness)
-{
-    emit brightnessChanged(brightness);
-}
-
-void Core::onResumeFromSuspend()
-{
-    // Notify the screensaver
-    OrgFreedesktopScreenSaverInterface iface("org.freedesktop.ScreenSaver",
-                                             "/ScreenSaver",
-                                             QDBusConnection::sessionBus());
-    iface.SimulateUserActivity();
-    PowerDevil::PolicyAgent::instance()->setupSystemdInhibition();
-
-    emit resumingFromSuspend();
 }
 
 void Core::onKIdleTimeoutReached(int identifier, int msec)
@@ -722,34 +705,9 @@ void Core::onResumingFromIdle()
     }
 }
 
-void Core::increaseBrightness()
-{
-    m_backend->brightnessKeyPressed(BackendInterface::Increase);
-}
-
-void Core::decreaseBrightness()
-{
-    m_backend->brightnessKeyPressed(BackendInterface::Decrease);
-}
-
 BackendInterface* Core::backend()
 {
     return m_backend;
-}
-
-void Core::suspendHybrid()
-{
-    triggerSuspendSession(4);
-}
-
-void Core::suspendToDisk()
-{
-    triggerSuspendSession(2);
-}
-
-void Core::suspendToRam()
-{
-    triggerSuspendSession(1);
 }
 
 bool Core::isLidClosed()
@@ -762,38 +720,9 @@ qulonglong Core::batteryRemainingTime() const
     return m_backend->batteryRemainingTime();
 }
 
-int Core::brightness() const
-{
-    return m_backend->brightness();
-}
-
 uint Core::backendCapabilities()
 {
     return m_backend->capabilities();
-}
-
-void Core::setBrightness(int percent)
-{
-    QVariantMap args;
-    args["Value"] = QVariant::fromValue<float>((float)percent);
-    args["Explicit"] = true;
-    ActionPool::instance()->loadAction("BrightnessControl", KConfigGroup(), this)->trigger(args);
-}
-
-void Core::triggerSuspendSession(uint action)
-{
-    PowerDevil::Action *helperAction = ActionPool::instance()->loadAction("SuspendSession", KConfigGroup(), this);
-    if (helperAction) {
-        QVariantMap args;
-        args["Type"] = action;
-        args["Explicit"] = true;
-        helperAction->trigger(args);
-    }
-}
-
-void Core::powerOffButtonTriggered()
-{
-    emit m_backend->buttonPressed(PowerDevil::BackendInterface::PowerButton);
 }
 
 }

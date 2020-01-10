@@ -1,0 +1,74 @@
+diff --git a/kwin/clients/aurorae/src/aurorae.cpp b/kwin/clients/aurorae/src/aurorae.cpp
+index a9487c3..6f63f6e 100644
+--- a/kwin/clients/aurorae/src/aurorae.cpp
++++ b/kwin/clients/aurorae/src/aurorae.cpp
+@@ -435,13 +435,13 @@ KDecorationDefines::Position AuroraeClient::mousePosition(const QPoint &point) c
+     }
+     if (point.x() >= (m_view->width() -  borderRight - paddingRight)) {
+         pos |= PositionRight;
+-    } else if (point.x() <= borderLeft + paddingLeft) {
++    } else if (point.x() <= (borderLeft + paddingLeft)) {
+         pos |= PositionLeft;
+     }
+ 
+-    if (point.y() >= m_view->height() - borderBottom - paddingBottom) {
++    if (point.y() >= (m_view->height() - borderBottom - paddingBottom)) {
+         pos |= PositionBottom;
+-    } else if (point.y() <= borderTop + paddingTop ) {
++    } else if (point.y() <= (borderTop + paddingTop)) {
+         pos |= PositionTop;
+     }
+ 
+diff --git a/kwin/clients/oxygen/config/oxygenexceptionlistwidget.cpp b/kwin/clients/oxygen/config/oxygenexceptionlistwidget.cpp
+index 3710ba2..8a11d07 100644
+--- a/kwin/clients/oxygen/config/oxygenexceptionlistwidget.cpp
++++ b/kwin/clients/oxygen/config/oxygenexceptionlistwidget.cpp
+@@ -86,8 +86,8 @@ namespace Oxygen
+     //__________________________________________________________
+     ConfigurationList ExceptionListWidget::exceptions( void )
+     {
+-        return model().get();
+         setChanged( false );
++        return model().get();
+     }
+ 
+     //__________________________________________________________
+diff --git a/plasma/generic/applets/systemtray/protocols/fdo/fdographicswidget.cpp b/plasma/generic/applets/systemtray/protocols/fdo/fdographicswidget.cpp
+index 80fbed3..7b8f8ed 100644
+--- a/plasma/generic/applets/systemtray/protocols/fdo/fdographicswidget.cpp
++++ b/plasma/generic/applets/systemtray/protocols/fdo/fdographicswidget.cpp
+@@ -74,8 +74,8 @@ FdoGraphicsWidget::FdoGraphicsWidget(WId winId, QGraphicsWidget *parent)
+         }
+     }
+ 
+-    if (parentView) {     
+-        parentView->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);      
++    if (parentView) {
++        parentView->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
+     }
+ 
+     connect(Plasma::Theme::defaultTheme(), SIGNAL(themeChanged()),
+@@ -216,10 +216,10 @@ void FdoGraphicsWidget::handleClientError(QX11EmbedContainer::Error error)
+ 
+ void FdoGraphicsWidget::resizeEvent(QGraphicsSceneResizeEvent *event)
+ {
++    Q_UNUSED(event);
+     if (d->widget) {
+         d->widget.data()->resize(size().toSize());
+     }
+-    
+ }
+ 
+ }
+diff --git a/powerdevil/daemon/backends/upower/xrandrx11helper.h b/powerdevil/daemon/backends/upower/xrandrx11helper.h
+index 184f582..7c4a154 100644
+--- a/powerdevil/daemon/backends/upower/xrandrx11helper.h
++++ b/powerdevil/daemon/backends/upower/xrandrx11helper.h
+@@ -42,7 +42,6 @@ class XRandRX11Helper : public QWidget
+         int m_versionMajor;
+         int m_versionMinor;
+ 
+-        bool m_debugMode;
+         Window m_window;
+ };
+ 

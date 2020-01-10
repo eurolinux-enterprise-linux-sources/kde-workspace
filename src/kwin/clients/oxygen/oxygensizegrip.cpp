@@ -32,7 +32,7 @@
 #include <cassert>
 #include <QtGui/QPainter>
 #include <QtGui/QPolygon>
-#include <QtCore/QTimer>
+#include <QTimer>
 
 #include <QtGui/QX11Info>
 #include <X11/Xlib.h>
@@ -108,6 +108,8 @@ namespace Oxygen
 
             // reparent
             XReparentWindow( QX11Info::display(), winId(), current, 0, 0 );
+            setWindowTitle( "Oxygen::SizeGrip" );
+            
         } else {
 
             hide();

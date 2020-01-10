@@ -28,6 +28,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <config-X11.h>
 
 #include "client.h"
+#include "cursor.h"
+#include "decorations.h"
+#include "focuschain.h"
+#include "netinfo.h"
 #include "workspace.h"
 #include "atoms.h"
 #ifdef KWIN_BUILD_TABBOX
@@ -39,181 +43,29 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "unmanaged.h"
 #include "useractions.h"
 #include "effects.h"
+#ifdef KWIN_BUILD_SCREENEDGES
+#include "screenedge.h"
+#endif
+#include "screens.h"
+#include "xcbutils.h"
 
 #include <QWhatsThis>
-#include <QApplication>
-#include <QtGui/QDesktopWidget>
 
 #include <kkeyserver.h>
 
 #include <X11/extensions/shape.h>
+#include <X11/extensions/Xfixes.h>
 #include <X11/extensions/Xrandr.h>
 #include <X11/Xatom.h>
 #include <QX11Info>
 
 #include "composite.h"
+#include "killwindow.h"
 
 namespace KWin
 {
 
 extern int currentRefreshRate();
-
-// ****************************************
-// WinInfo
-// ****************************************
-
-WinInfo::WinInfo(Client * c, Display * display, Window window,
-                 Window rwin, const unsigned long pr[], int pr_size)
-    : NETWinInfo2(display, window, rwin, pr, pr_size, NET::WindowManager), m_client(c)
-{
-}
-
-void WinInfo::changeDesktop(int desktop)
-{
-    m_client->workspace()->sendClientToDesktop(m_client, desktop, true);
-}
-
-void WinInfo::changeFullscreenMonitors(NETFullscreenMonitors topology)
-{
-    m_client->updateFullscreenMonitors(topology);
-}
-
-void WinInfo::changeState(unsigned long state, unsigned long mask)
-{
-    mask &= ~NET::Sticky; // KWin doesn't support large desktops, ignore
-    mask &= ~NET::Hidden; // clients are not allowed to change this directly
-    state &= mask; // for safety, clear all other bits
-
-    if ((mask & NET::FullScreen) != 0 && (state & NET::FullScreen) == 0)
-        m_client->setFullScreen(false, false);
-    if ((mask & NET::Max) == NET::Max)
-        m_client->setMaximize(state & NET::MaxVert, state & NET::MaxHoriz);
-    else if (mask & NET::MaxVert)
-        m_client->setMaximize(state & NET::MaxVert, m_client->maximizeMode() & Client::MaximizeHorizontal);
-    else if (mask & NET::MaxHoriz)
-        m_client->setMaximize(m_client->maximizeMode() & Client::MaximizeVertical, state & NET::MaxHoriz);
-
-    if (mask & NET::Shaded)
-        m_client->setShade(state & NET::Shaded ? ShadeNormal : ShadeNone);
-    if (mask & NET::KeepAbove)
-        m_client->setKeepAbove((state & NET::KeepAbove) != 0);
-    if (mask & NET::KeepBelow)
-        m_client->setKeepBelow((state & NET::KeepBelow) != 0);
-    if (mask & NET::SkipTaskbar)
-        m_client->setSkipTaskbar((state & NET::SkipTaskbar) != 0, true);
-    if (mask & NET::SkipPager)
-        m_client->setSkipPager((state & NET::SkipPager) != 0);
-    if (mask & NET::DemandsAttention)
-        m_client->demandAttention((state & NET::DemandsAttention) != 0);
-    if (mask & NET::Modal)
-        m_client->setModal((state & NET::Modal) != 0);
-    // unsetting fullscreen first, setting it last (because e.g. maximize works only for !isFullScreen() )
-    if ((mask & NET::FullScreen) != 0 && (state & NET::FullScreen) != 0)
-        m_client->setFullScreen(true, false);
-}
-
-void WinInfo::disable()
-{
-    m_client = NULL; // only used when the object is passed to Deleted
-}
-
-// ****************************************
-// RootInfo
-// ****************************************
-
-RootInfo::RootInfo(Workspace* ws, Display *dpy, Window w, const char *name, unsigned long pr[], int pr_num, int scr)
-    : NETRootInfo(dpy, w, name, pr, pr_num, scr)
-{
-    workspace = ws;
-}
-
-void RootInfo::changeNumberOfDesktops(int n)
-{
-    workspace->setNumberOfDesktops(n);
-}
-
-void RootInfo::changeCurrentDesktop(int d)
-{
-    workspace->setCurrentDesktop(d);
-}
-
-void RootInfo::changeActiveWindow(Window w, NET::RequestSource src, Time timestamp, Window active_window)
-{
-    if (Client* c = workspace->findClient(WindowMatchPredicate(w))) {
-        if (timestamp == CurrentTime)
-            timestamp = c->userTime();
-        if (src != NET::FromApplication && src != FromTool)
-            src = NET::FromTool;
-        if (src == NET::FromTool)
-            workspace->activateClient(c, true);   // force
-        else if (c == workspace->mostRecentlyActivatedClient()) {
-            return; // WORKAROUND? With > 1 plasma activities, we cause this ourselves. bug #240673
-        } else { // NET::FromApplication
-            Client* c2;
-            if (workspace->allowClientActivation(c, timestamp, false, true))
-                workspace->activateClient(c);
-            // if activation of the requestor's window would be allowed, allow activation too
-            else if (active_window != None
-                    && (c2 = workspace->findClient(WindowMatchPredicate(active_window))) != NULL
-                    && workspace->allowClientActivation(c2,
-                            timestampCompare(timestamp, c2->userTime() > 0 ? timestamp : c2->userTime()), false, true)) {
-                workspace->activateClient(c);
-            } else
-                c->demandAttention();
-        }
-    }
-}
-
-void RootInfo::restackWindow(Window w, RequestSource src, Window above, int detail, Time timestamp)
-{
-    if (Client* c = workspace->findClient(WindowMatchPredicate(w))) {
-        if (timestamp == CurrentTime)
-            timestamp = c->userTime();
-        if (src != NET::FromApplication && src != FromTool)
-            src = NET::FromTool;
-        c->restackWindow(above, detail, src, timestamp, true);
-    }
-}
-
-void RootInfo::gotTakeActivity(Window w, Time timestamp, long flags)
-{
-    if (Client* c = workspace->findClient(WindowMatchPredicate(w)))
-        workspace->handleTakeActivity(c, timestamp, flags);
-}
-
-void RootInfo::closeWindow(Window w)
-{
-    Client* c = workspace->findClient(WindowMatchPredicate(w));
-    if (c)
-        c->closeWindow();
-}
-
-void RootInfo::moveResize(Window w, int x_root, int y_root, unsigned long direction)
-{
-    Client* c = workspace->findClient(WindowMatchPredicate(w));
-    if (c) {
-        updateXTime(); // otherwise grabbing may have old timestamp - this message should include timestamp
-        c->NETMoveResize(x_root, y_root, (Direction)direction);
-    }
-}
-
-void RootInfo::moveResizeWindow(Window w, int flags, int x, int y, int width, int height)
-{
-    Client* c = workspace->findClient(WindowMatchPredicate(w));
-    if (c)
-        c->NETMoveResizeWindow(flags, x, y, width, height);
-}
-
-void RootInfo::gotPing(Window w, Time timestamp)
-{
-    if (Client* c = workspace->findClient(WindowMatchPredicate(w)))
-        c->gotPing(timestamp);
-}
-
-void RootInfo::changeShowingDesktop(bool showing)
-{
-    workspace->setShowingDesktop(showing);
-}
 
 // ****************************************
 // Workspace
@@ -228,13 +80,19 @@ bool Workspace::workspaceEvent(XEvent * e)
             && (e->type == KeyPress || e->type == KeyRelease))
         return false; // let Qt process it, it'll be intercepted again in eventFilter()
 
+    if (!m_windowKiller.isNull() && m_windowKiller->isActive() && m_windowKiller->isResponsibleForEvent(e->type)) {
+        m_windowKiller->processEvent(e);
+        // filter out the event
+        return true;
+    }
+
     if (e->type == PropertyNotify || e->type == ClientMessage) {
         unsigned long dirty[ NETRootInfo::PROPERTIES_SIZE ];
-        rootInfo->event(e, dirty, NETRootInfo::PROPERTIES_SIZE);
+        rootInfo()->event(e, dirty, NETRootInfo::PROPERTIES_SIZE);
         if (dirty[ NETRootInfo::PROTOCOLS ] & NET::DesktopNames)
-            saveDesktopSettings();
+            VirtualDesktopManager::self()->save();
         if (dirty[ NETRootInfo::PROTOCOLS2 ] & NET::WM2DesktopLayout)
-            updateDesktopLayout();
+            VirtualDesktopManager::self()->updateLayout();
     }
 
     // events that should be handled before Clients can get them
@@ -245,12 +103,21 @@ bool Workspace::workspaceEvent(XEvent * e)
         // fallthrough
     case MotionNotify:
 #ifdef KWIN_BUILD_TABBOX
-        if (tabBox()->isGrabbed()) {
-            return tab_box->handleMouseEvent(e);
+        if (TabBox::TabBox::self()->isGrabbed()) {
+#ifdef KWIN_BUILD_SCREENEDGES
+            ScreenEdges::self()->check(QPoint(e->xbutton.x_root, e->xbutton.y_root), QDateTime::fromMSecsSinceEpoch(xTime()), true);
+#endif
+            return TabBox::TabBox::self()->handleMouseEvent(e);
         }
 #endif
-        if (effects && static_cast<EffectsHandlerImpl*>(effects)->checkInputWindowEvent(e))
+        if (effects && static_cast<EffectsHandlerImpl*>(effects)->checkInputWindowEvent(e)) {
             return true;
+        }
+#ifdef KWIN_BUILD_SCREENEDGES
+        if (QWidget::mouseGrabber()) {
+            ScreenEdges::self()->check(QPoint(e->xbutton.x_root, e->xbutton.y_root), QDateTime::fromMSecsSinceEpoch(xTime()), true);
+        }
+#endif
         break;
     case KeyPress: {
         was_user_interaction = true;
@@ -262,8 +129,8 @@ bool Workspace::workspaceEvent(XEvent * e)
             return true;
         }
 #ifdef KWIN_BUILD_TABBOX
-        if (tabBox()->isGrabbed()) {
-            tabBox()->keyPress(keyQt);
+        if (TabBox::TabBox::self()->isGrabbed()) {
+            TabBox::TabBox::self()->keyPress(keyQt);
             return true;
         }
 #endif
@@ -272,8 +139,8 @@ bool Workspace::workspaceEvent(XEvent * e)
     case KeyRelease:
         was_user_interaction = true;
 #ifdef KWIN_BUILD_TABBOX
-        if (tabBox()->isGrabbed()) {
-            tabBox()->keyRelease(e->xkey);
+        if (TabBox::TabBox::self()->isGrabbed()) {
+            TabBox::TabBox::self()->keyRelease(e->xkey);
             return true;
         }
 #endif
@@ -350,7 +217,7 @@ bool Workspace::workspaceEvent(XEvent * e)
             // e->xmaprequest.window is different from e->xany.window
             // TODO this shouldn't be necessary now
             c->windowEvent(e);
-            updateFocusChains(c, FocusChainUpdate);
+            FocusChain::self()->update(c, FocusChain::Update);
         } else if ( true /*|| e->xmaprequest.parent != root */ ) {
             // NOTICE don't check for the parent being the root window, this breaks when some app unmaps
             // a window, changes something and immediately maps it back, without giving KWin
@@ -382,7 +249,7 @@ bool Workspace::workspaceEvent(XEvent * e)
                 QWhatsThis::leaveWhatsThisMode();
         }
 #ifdef KWIN_BUILD_SCREENEDGES
-        if (m_screenEdge.isEntered(e))
+        if (ScreenEdges::self()->isEntered(e))
             return true;
 #endif
         break;
@@ -436,7 +303,7 @@ bool Workspace::workspaceEvent(XEvent * e)
         return true; // always eat these, they would tell Qt that KWin is the active app
     case ClientMessage:
 #ifdef KWIN_BUILD_SCREENEDGES
-        if (m_screenEdge.isEntered(e))
+        if (ScreenEdges::self()->isEntered(e))
             return true;
 #endif
         break;
@@ -460,7 +327,7 @@ bool Workspace::workspaceEvent(XEvent * e)
         }
         break;
     default:
-        if (e->type == Extensions::randrNotifyEvent() && Extensions::randrAvailable()) {
+        if (e->type == Xcb::Extensions::self()->randrNotifyEvent() && Xcb::Extensions::self()->isRandrAvailable()) {
             XRRUpdateConfiguration(e);
             if (compositing()) {
                 // desktopResized() should take care of when the size or
@@ -470,13 +337,15 @@ bool Workspace::workspaceEvent(XEvent * e)
                     m_compositor->setCompositeResetTimer(0);
             }
 
-        } else if (e->type == Extensions::syncAlarmNotifyEvent() && Extensions::syncAvailable()) {
+        } else if (e->type == Xcb::Extensions::self()->syncAlarmNotifyEvent() && Xcb::Extensions::self()->isSyncAvailable()) {
 #ifdef HAVE_XSYNC
             foreach (Client * c, clients)
                 c->syncEvent(reinterpret_cast< XSyncAlarmNotifyEvent* >(e));
             foreach (Client * c, desktops)
                 c->syncEvent(reinterpret_cast< XSyncAlarmNotifyEvent* >(e));
 #endif
+        } else if (e->type == Xcb::Extensions::self()->fixesCursorNotifyEvent() && Xcb::Extensions::self()->isFixesAvailable()) {
+            Cursor::self()->notifyCursorChanged(reinterpret_cast<XFixesCursorNotifyEvent*>(e)->cursor_serial);
         }
         break;
     }
@@ -499,7 +368,7 @@ bool Workspace::workspaceEvent(QEvent* e)
 // Some events don't have the actual window which caused the event
 // as e->xany.window (e.g. ConfigureRequest), but as some other
 // field in the XEvent structure.
-Window Workspace::findSpecialEventWindow(XEvent* e)
+xcb_window_t Workspace::findSpecialEventWindow(XEvent *e)
 {
     switch(e->type) {
     case CreateNotify:
@@ -543,30 +412,26 @@ bool Client::windowEvent(XEvent* e)
         double old_opacity = opacity();
         info->event(e, dirty, 2);   // pass through the NET stuff
 
-        if ((dirty[ WinInfo::PROTOCOLS ] & NET::WMName) != 0)
+        if ((dirty[ NETWinInfo::PROTOCOLS ] & NET::WMName) != 0)
             fetchName();
-        if ((dirty[ WinInfo::PROTOCOLS ] & NET::WMIconName) != 0)
+        if ((dirty[ NETWinInfo::PROTOCOLS ] & NET::WMIconName) != 0)
             fetchIconicName();
-        if ((dirty[ WinInfo::PROTOCOLS ] & NET::WMStrut) != 0
-                || (dirty[ WinInfo::PROTOCOLS2 ] & NET::WM2ExtendedStrut) != 0) {
+        if ((dirty[ NETWinInfo::PROTOCOLS ] & NET::WMStrut) != 0
+                || (dirty[ NETWinInfo::PROTOCOLS2 ] & NET::WM2ExtendedStrut) != 0) {
             workspace()->updateClientArea();
         }
-        if ((dirty[ WinInfo::PROTOCOLS ] & NET::WMIcon) != 0)
+        if ((dirty[ NETWinInfo::PROTOCOLS ] & NET::WMIcon) != 0)
             getIcons();
         // Note there's a difference between userTime() and info->userTime()
         // info->userTime() is the value of the property, userTime() also includes
         // updates of the time done by KWin (ButtonPress on windowrapper etc.).
-        if ((dirty[ WinInfo::PROTOCOLS2 ] & NET::WM2UserTime) != 0) {
+        if ((dirty[ NETWinInfo::PROTOCOLS2 ] & NET::WM2UserTime) != 0) {
             workspace()->setWasUserInteraction();
             updateUserTime(info->userTime());
         }
-        if ((dirty[ WinInfo::PROTOCOLS2 ] & NET::WM2StartupId) != 0)
+        if ((dirty[ NETWinInfo::PROTOCOLS2 ] & NET::WM2StartupId) != 0)
             startupIdChanged();
-        if (dirty[ WinInfo::PROTOCOLS ] & NET::WMIconGeometry) {
-            if (demandAttentionKNotifyTimer != NULL)
-                demandAttentionKNotify();
-        }
-        if (dirty[ WinInfo::PROTOCOLS2 ] & NET::WM2Opacity) {
+        if (dirty[ NETWinInfo::PROTOCOLS2 ] & NET::WM2Opacity) {
             if (compositing()) {
                 addRepaintFull();
                 emit opacityChanged(this, old_opacity);
@@ -576,7 +441,7 @@ bool Client::windowEvent(XEvent* e)
                 i.setOpacity(info->opacity());
             }
         }
-        if (dirty[ WinInfo::PROTOCOLS2 ] & NET::WM2FrameOverlap) {
+        if (dirty[ NETWinInfo::PROTOCOLS2 ] & NET::WM2FrameOverlap) {
             // ### Inform the decoration
         }
     }
@@ -653,23 +518,16 @@ bool Client::windowEvent(XEvent* e)
     case ClientMessage:
         clientMessageEvent(&e->xclient);
         break;
-    case ColormapChangeMask:
-        if (e->xany.window == window()) {
-            cmap = e->xcolormap.colormap;
-            if (isActive())
-                workspace()->updateColormap();
-        }
-        break;
     default:
         if (e->xany.window == window()) {
-            if (e->type == Extensions::shapeNotifyEvent()) {
+            if (e->type == Xcb::Extensions::self()->shapeNotifyEvent()) {
                 detectShape(window());  // workaround for #19644
                 updateShape();
             }
         }
         if (e->xany.window == frameId()) {
-            if (e->type == Extensions::damageNotifyEvent())
-                damageNotifyEvent(reinterpret_cast< XDamageNotifyEvent* >(e));
+            if (e->type == Xcb::Extensions::self()->damageNotifyEvent())
+                damageNotifyEvent();
         }
         break;
     }
@@ -727,7 +585,17 @@ void Client::unmapNotifyEvent(XUnmapEvent* e)
         if (ignore)
             return;
     }
-    releaseWindow();
+
+    // check whether this is result of an XReparentWindow - client then won't be parented by wrapper
+    // in this case do not release the client (causes reparent to root, removal from saveSet and what not)
+    // but just destroy the client
+    Xcb::Tree tree(m_client);
+    xcb_window_t daddy = tree.parent();
+    if (daddy == m_wrapper) {
+        releaseWindow(); // unmapped from a regular client state
+    } else {
+        destroyClient(); // the client was moved to some other parent
+    }
 }
 
 void Client::destroyNotifyEvent(XDestroyWindowEvent* e)
@@ -889,7 +757,7 @@ void Client::enterNotifyEvent(XCrossingEvent* e)
         if (options->isAutoRaise() && !isDesktop() &&
                 !isDock() && workspace()->focusChangeEnabled() &&
                 currentPos != workspace()->focusMousePosition() &&
-                workspace()->topClientOnDesktop(workspace()->currentDesktop(),
+                workspace()->topClientOnDesktop(VirtualDesktopManager::self()->current(),
                                                 options->isSeparateScreenFocus() ? screen() : -1) != this) {
             delete autoRaiseTimer;
             autoRaiseTimer = new QTimer(this);
@@ -1000,7 +868,7 @@ void Client::updateMouseGrab()
     if (workspace()->globalShortcutsDisabled()) {
         XUngrabButton(display(), AnyButton, AnyModifier, wrapperId());
         // keep grab for the simple click without modifiers if needed (see below)
-        bool not_obscured = workspace()->topClientOnDesktop(workspace()->currentDesktop(), -1, true, false) == this;
+        bool not_obscured = workspace()->topClientOnDesktop(VirtualDesktopManager::self()->current(), -1, true, false) == this;
         if (!(!options->isClickRaise() || not_obscured))
             grabButton(None);
         return;
@@ -1015,7 +883,7 @@ void Client::updateMouseGrab()
         // is unobscured or if the user doesn't want click raise
         // (it is unobscured if it the topmost in the unconstrained stacking order, i.e. it is
         // the most recently raised window)
-        bool not_obscured = workspace()->topClientOnDesktop(workspace()->currentDesktop(), -1, true, false) == this;
+        bool not_obscured = workspace()->topClientOnDesktop(VirtualDesktopManager::self()->current(), -1, true, false) == this;
         if (!options->isClickRaise() || not_obscured)
             ungrabButton(None);
         else
@@ -1092,7 +960,7 @@ static bool modKeyDown(int state) {
 
 
 // return value matters only when filtering events before decoration gets them
-bool Client::buttonPressEvent(Window w, int button, int state, int x, int y, int x_root, int y_root)
+bool Client::buttonPressEvent(xcb_window_t w, int button, int state, int x, int y, int x_root, int y_root)
 {
     if (buttonDown) {
         if (w == wrapperId())
@@ -1266,7 +1134,7 @@ void Client::processMousePressEvent(QMouseEvent* e)
 }
 
 // return value matters only when filtering events before decoration gets them
-bool Client::buttonReleaseEvent(Window w, int /*button*/, int state, int x, int y, int x_root, int y_root)
+bool Client::buttonReleaseEvent(xcb_window_t w, int button, int state, int x, int y, int x_root, int y_root)
 {
     if (w == decorationId() && !buttonDown)
         return false;
@@ -1278,7 +1146,17 @@ bool Client::buttonReleaseEvent(Window w, int /*button*/, int state, int x, int 
         return true;
     x = this->x(); // translate from grab window to local coords
     y = this->y();
-    if ((state & (Button1Mask & Button2Mask & Button3Mask)) == 0) {
+
+    // Check whether other buttons are still left pressed
+    int buttonMask = XCB_BUTTON_MASK_1 | XCB_BUTTON_MASK_2 | XCB_BUTTON_MASK_3;
+    if (button == XCB_BUTTON_INDEX_1)
+        buttonMask &= ~XCB_BUTTON_MASK_1;
+    else if (button == XCB_BUTTON_INDEX_2)
+        buttonMask &= ~XCB_BUTTON_MASK_2;
+    else if (button == XCB_BUTTON_INDEX_3)
+        buttonMask &= ~XCB_BUTTON_MASK_3;
+
+    if ((state & buttonMask) == 0) {
         buttonDown = false;
         stopDelayedMoveResize();
         if (moveResizeMode) {
@@ -1286,7 +1164,7 @@ bool Client::buttonReleaseEvent(Window w, int /*button*/, int state, int x, int 
             // mouse position is still relative to old Client position, adjust it
             QPoint mousepos(x_root - x + padding_left, y_root - y + padding_top);
             mode = mousePosition(mousepos);
-        } else if (workspace()->decorationSupportsTabbing())
+        } else if (decorationPlugin()->supportsTabbing())
             return false;
         updateCursor();
     }
@@ -1331,12 +1209,12 @@ void Client::checkQuickTilingMaximizationZones(int xroot, int yroot)
 {
 
     QuickTileMode mode = QuickTileNone;
-    for (int i=0; i<QApplication::desktop()->screenCount(); ++i) {
+    for (int i=0; i<screens()->count(); ++i) {
 
-        const QRect &area = QApplication::desktop()->screenGeometry(i);
-        if (!area.contains(QPoint(xroot, yroot)))
+        if (!screens()->geometry(i).contains(QPoint(xroot, yroot)))
             continue;
 
+        QRect area = workspace()->clientArea(MaximizeArea, QPoint(xroot, yroot), desktop());
         if (options->electricBorderTiling()) {
         if (xroot <= area.x() + 20)
             mode |= QuickTileLeft;
@@ -1358,7 +1236,7 @@ void Client::checkQuickTilingMaximizationZones(int xroot, int yroot)
 }
 
 // return value matters only when filtering events before decoration gets them
-bool Client::motionNotifyEvent(Window w, int state, int x, int y, int x_root, int y_root)
+bool Client::motionNotifyEvent(xcb_window_t w, int state, int x, int y, int x_root, int y_root)
 {
     if (w != frameId() && w != decorationId() && w != inputId() && w != moveResizeGrabWindow())
         return true; // care only about the whole frame
@@ -1386,9 +1264,20 @@ bool Client::motionNotifyEvent(Window w, int state, int x, int y, int x_root, in
         y = this->y();
     }
     if (!waitingMotionEvent()) {
+        QRect oldGeo = geometry();
         handleMoveResize(x, y, x_root, y_root);
-        if (isMove() && isResizable())
-            checkQuickTilingMaximizationZones(x_root, y_root);
+        if (!isFullScreen() && isMove()) {
+            if (quick_tile_mode != QuickTileNone && oldGeo != geometry()) {
+                GeometryUpdatesBlocker blocker(this);
+                setQuickTileMode(QuickTileNone);
+                moveOffset = QPoint(double(moveOffset.x()) / double(oldGeo.width()) * double(geom_restore.width()),
+                                    double(moveOffset.y()) / double(oldGeo.height()) * double(geom_restore.height()));
+                moveResizeGeom = geom_restore;
+                handleMoveResize(x, y, x_root, y_root); // fix position
+            } else if (quick_tile_mode == QuickTileNone && isResizable()) {
+                checkQuickTilingMaximizationZones(x_root, y_root);
+            }
+        }
     }
     return true;
 }
@@ -1432,10 +1321,10 @@ static bool follows_focusin = false;
 static bool follows_focusin_failed = false;
 static Bool predicate_follows_focusin(Display*, XEvent* e, XPointer arg)
 {
+    Q_UNUSED(arg)
     if (follows_focusin || follows_focusin_failed)
         return False;
-    Client* c = (Client*) arg;
-    if (e->type == FocusIn && c->workspace()->findClient(WindowMatchPredicate(e->xfocus.window))) {
+    if (e->type == FocusIn && workspace()->findClient(WindowMatchPredicate(e->xfocus.window))) {
         // found FocusIn
         follows_focusin = true;
         return False;
@@ -1512,11 +1401,11 @@ void Client::NETMoveResize(int x_root, int y_root, NET::Direction direction)
         updateCursor();
     } else if (direction == NET::KeyboardMove) {
         // ignore mouse coordinates given in the message, mouse position is used by the moving algorithm
-        QCursor::setPos(geometry().center());
+        Cursor::setPos(geometry().center());
         performMouseCommand(Options::MouseUnrestrictedMove, geometry().center());
     } else if (direction == NET::KeyboardSize) {
         // ignore mouse coordinates given in the message, mouse position is used by the resizing algorithm
-        QCursor::setPos(geometry().bottomRight());
+        Cursor::setPos(geometry().bottomRight());
         performMouseCommand(Options::MouseUnrestrictedResize, geometry().bottomRight());
     }
 }
@@ -1559,7 +1448,7 @@ void Client::keyPressEvent(uint key_code)
     default:
         return;
     }
-    QCursor::setPos(pos);
+    Cursor::setPos(pos);
 }
 
 #ifdef HAVE_XSYNC
@@ -1597,7 +1486,7 @@ bool Unmanaged::windowEvent(XEvent* e)
     }
     switch(e->type) {
     case UnmapNotify:
-        workspace()->updateFocusMousePosition(QCursor::pos());
+        workspace()->updateFocusMousePosition(Cursor::pos());
         unmapNotifyEvent(&e->xunmap);
         break;
     case MapNotify:
@@ -1610,14 +1499,14 @@ bool Unmanaged::windowEvent(XEvent* e)
         propertyNotifyEvent(&e->xproperty);
         break;
     default: {
-        if (e->type == Extensions::shapeNotifyEvent()) {
+        if (e->type == Xcb::Extensions::self()->shapeNotifyEvent()) {
             detectShape(window());
             addRepaintFull();
             addWorkspaceRepaint(geometry());  // in case shape change removes part of this window
             emit geometryShapeChanged(this, geometry());
         }
-        if (e->type == Extensions::damageNotifyEvent())
-            damageNotifyEvent(reinterpret_cast< XDamageNotifyEvent* >(e));
+        if (e->type == Xcb::Extensions::self()->damageNotifyEvent())
+            damageNotifyEvent();
         break;
     }
     }
@@ -1642,6 +1531,7 @@ void Unmanaged::configureNotifyEvent(XConfigureEvent* e)
         addWorkspaceRepaint(visibleRect());  // damage old area
         QRect old = geom;
         geom = newgeom;
+        emit geometryChanged(); // update shadow region
         addRepaintFull();
         if (old.size() != geom.size())
             discardWindowPixmap();
@@ -1667,6 +1557,8 @@ void Toplevel::propertyNotifyEvent(XPropertyEvent* e)
             getShadow();
         else if (e->atom == atoms->net_wm_opaque_region)
             getWmOpaqueRegion();
+        else if (e->atom == atoms->kde_skip_close_animation)
+            getSkipCloseAnimation();
         break;
     }
     emit propertyNotify(this, e->atom);
@@ -1680,7 +1572,7 @@ bool Group::groupEvent(XEvent* e)
 {
     unsigned long dirty[ 2 ];
     leader_info->event(e, dirty, 2);   // pass through the NET stuff
-    if ((dirty[ WinInfo::PROTOCOLS2 ] & NET::WM2StartupId) != 0)
+    if ((dirty[ NETWinInfo::PROTOCOLS2 ] & NET::WM2StartupId) != 0)
         startupIdChanged();
     return false;
 }

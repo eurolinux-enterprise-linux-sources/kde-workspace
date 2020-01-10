@@ -25,14 +25,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <kwinglobals.h>
 #include <kservice.h>
 
-#include <QtCore/QFile>
-#include <QtCore/QHash>
-#include <QtCore/QStringList>
+#include <QFile>
+#include <QHash>
+#include <QStringList>
 #include <QtScript/QScriptEngineAgent>
 
+class QDeclarativeComponent;
+class QDeclarativeEngine;
 class QAction;
-class QDeclarativeView;
 class QDBusPendingCallWatcher;
+class QGraphicsScene;
 class QMenu;
 class QMutex;
 class QScriptEngine;
@@ -134,7 +136,7 @@ public Q_SLOTS:
 
 private Q_SLOTS:
     void globalShortcutTriggered();
-    void borderActivated(ElectricBorder edge);
+    bool borderActivated(ElectricBorder edge);
     /**
      * @brief Slot invoked when a menu action is destroyed. Used to remove the action and callback
      * from the map of actions.
@@ -257,7 +259,7 @@ private:
 class ScriptUnloaderAgent : public QScriptEngineAgent
 {
 public:
-    ScriptUnloaderAgent(Script *script);
+    explicit ScriptUnloaderAgent(Script *script);
     virtual void scriptUnload(qint64 id);
 
 private:
@@ -275,8 +277,13 @@ public:
 public Q_SLOTS:
     Q_SCRIPTABLE void run();
 
+private Q_SLOTS:
+    void createComponent();
+
 private:
-    QScopedPointer<QDeclarativeView> m_view;
+    QDeclarativeEngine *m_engine;
+    QDeclarativeComponent *m_component;
+    QGraphicsScene *m_scene;
 };
 
 /**
@@ -287,6 +294,7 @@ class Scripting : public QObject
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "org.kde.kwin.Scripting")
 private:
+    explicit Scripting(QObject *parent);
     QStringList scriptList;
     QList<KWin::AbstractScript*> scripts;
     /**
@@ -298,7 +306,6 @@ private:
     void runScripts();
 
 public:
-    Scripting(QObject *parent = NULL);
     ~Scripting();
     Q_SCRIPTABLE Q_INVOKABLE int loadScript(const QString &filePath, const QString &pluginName = QString());
     Q_SCRIPTABLE Q_INVOKABLE int loadDeclarativeScript(const QString &filePath, const QString &pluginName = QString());
@@ -314,6 +321,9 @@ public:
      **/
     QList<QAction*> actionsForUserActionMenu(Client *c, QMenu *parent);
 
+    static Scripting *self();
+    static Scripting *create(QObject *parent);
+
 public Q_SLOTS:
     void scriptDestroyed(QObject *object);
     Q_SCRIPTABLE void start();
@@ -323,7 +333,14 @@ private Q_SLOTS:
 
 private:
     LoadScriptList queryScriptsToLoad();
+    static Scripting *s_self;
 };
+
+inline
+Scripting *Scripting::self()
+{
+    return s_self;
+}
 
 }
 #endif

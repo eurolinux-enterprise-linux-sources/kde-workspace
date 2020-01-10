@@ -30,9 +30,9 @@
 #include "oxygenbutton.h"
 #include "oxygenanimation.h"
 
-#include <QtCore/QList>
-#include <QtCore/QWeakPointer>
-#include <QtCore/QRect>
+#include <QList>
+#include <QWeakPointer>
+#include <QRect>
 
 namespace Oxygen
 {
@@ -109,7 +109,7 @@ namespace Oxygen
         enum { NoItem = -1 };
 
         //! constructor
-        ClientGroupItemDataList( Client* parent );
+        explicit ClientGroupItemDataList( Client* parent );
 
         //! dirty state
         void setDirty( const bool& value )

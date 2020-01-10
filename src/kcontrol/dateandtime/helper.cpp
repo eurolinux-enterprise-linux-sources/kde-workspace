@@ -52,8 +52,18 @@
 // clears it. So we have to use a reasonable default.
 static const QString exePath = QLatin1String("/usr/sbin:/usr/bin:/sbin:/bin");
 
-int ClockHelper::ntp( const QStringList& ntpServers, bool ntpEnabled,
-                      const QString& ntpUtility )
+static QString findNtpUtility()
+{
+    foreach(const QString &possible_ntputility, QStringList() << "ntpdate" << "rdate" ) {
+        const QString ntpUtility = KStandardDirs::findExe(possible_ntputility, exePath);
+        if (!ntpUtility.isEmpty()) {
+            return ntpUtility;
+        }
+    }
+    return QString();
+}
+
+int ClockHelper::ntp( const QStringList& ntpServers, bool ntpEnabled )
 {
   int ret = 0;
 
@@ -68,6 +78,8 @@ int ClockHelper::ntp( const QStringList& ntpServers, bool ntpEnabled,
   KConfigGroup config(&_config, "NTP");
   config.writeEntry("servers", ntpServers );
   config.writeEntry("enabled", ntpEnabled );
+
+  QString ntpUtility(findNtpUtility());
 
   if ( ntpEnabled && !ntpUtility.isEmpty() ) {
     // NTP Time setting
@@ -111,6 +123,13 @@ int ClockHelper::date( const QString& newdate, const QString& olddate )
 int ClockHelper::tz( const QString& selectedzone )
 {
     int ret = 0;
+
+    //only allow letters, numbers hyphen underscore plus and forward slash
+    //allowed pattern taken from time-util.c in systemd
+    if (!QRegExp("[a-zA-Z0-9-_+/]*").exactMatch(selectedzone)) {
+        return ret;
+    }
+
 #if defined(USE_SOLARIS)	// MARCO
 
         KTemporaryFile tf;
@@ -227,7 +246,7 @@ ActionReply ClockHelper::save(const QVariantMap &args)
   int ret = 0; // error code
 //  The order here is important
   if( _ntp )
-    ret |= ntp( args.value("ntpServers").toStringList(), args.value("ntpEnabled").toBool(), args.value("ntpUtility").toString() );
+    ret |= ntp( args.value("ntpServers").toStringList(), args.value("ntpEnabled").toBool());
   if( _date )
     ret |= date( args.value("newdate").toString(), args.value("olddate").toString() );
   if( _tz )

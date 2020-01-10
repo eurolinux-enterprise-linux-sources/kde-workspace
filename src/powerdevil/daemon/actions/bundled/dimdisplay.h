@@ -42,6 +42,7 @@ protected:
     virtual void onIdleTimeout(int msec);
     virtual void onProfileLoad();
     virtual void triggerImpl(const QVariantMap& args);
+    virtual bool isSupported();
 
 public:
     virtual bool loadAction(const KConfigGroup& config);
@@ -51,6 +52,7 @@ private:
 
     int m_dimOnIdleTime;
     float m_oldBrightness;
+    bool m_dimmed;
 };
 
 }

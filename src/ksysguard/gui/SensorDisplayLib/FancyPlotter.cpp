@@ -519,7 +519,7 @@ void FancyPlotter::setTooltip()
         }
         if (beamId != sensor->beamId) {
             if (!sensor->summationName.isEmpty()) {
-                tooltip += i18nc("%1 is what is being shown statistics for, like 'Memory', 'Swap', etc.", "<p><b>%1:</b><br>", sensor->summationName);
+                tooltip += i18nc("%1 is what is being shown statistics for, like 'Memory', 'Swap', etc.", "<p><b>%1:</b><br>", i18n(sensor->summationName.toUtf8().constData()));
                 showingSummationGroup = true;
                 neednewline = false;
             } else if (showingSummationGroup) {
@@ -856,6 +856,7 @@ bool FancyPlotter::saveSettings( QDomDocument &doc, QDomElement &element)
 
     element.setAttribute( "version", 1 );
     element.setAttribute( "labels", mPlotter->showAxis() );
+    element.setAttribute( "fontSize", mPlotter->font().pointSize() );
 
     QHash<QString,QDomElement> hash;
     int beamId = -1;

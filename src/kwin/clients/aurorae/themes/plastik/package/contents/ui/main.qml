@@ -22,26 +22,42 @@ Decoration {
     function readConfig() {
         switch (decoration.readConfig("BorderSize", DecorationOptions.BorderNormal)) {
         case DecorationOptions.BorderTiny:
-            root.borderSize = 3;
+            borders.setBorders(3);
+            extendedBorders.setAllBorders(0);
             break;
         case DecorationOptions.BorderLarge:
-            root.borderSize = 8;
+            borders.setBorders(8);
+            extendedBorders.setAllBorders(0);
             break;
         case DecorationOptions.BorderVeryLarge:
-            root.borderSize = 12;
+            borders.setBorders(12);
+            extendedBorders.setAllBorders(0);
             break;
         case DecorationOptions.BorderHuge:
-            root.borderSize = 18;
+            borders.setBorders(18);
+            extendedBorders.setAllBorders(0);
             break;
         case DecorationOptions.BorderVeryHuge:
-            root.borderSize = 27;
+            borders.setBorders(27);
+            extendedBorders.setAllBorders(0);
             break;
         case DecorationOptions.BorderOversized:
-            root.borderSize = 40;
+            borders.setBorders(40);
+            extendedBorders.setAllBorders(0);
+            break;
+        case DecorationOptions.BorderNoSides:
+            borders.setBorders(4);
+            borders.setSideBorders(1);
+            extendedBorders.setSideBorders(3);
+            break;
+        case DecorationOptions.BorderNone:
+            borders.setBorders(1);
+            extendedBorders.setBorders(3);
             break;
         case DecorationOptions.BorderNormal: // fall through to default
         default:
-            root.borderSize = 4;
+            borders.setBorders(4);
+            extendedBorders.setAllBorders(0);
             break;
         }
         var titleAlignLeft = decoration.readConfig("titleAlignLeft", true);
@@ -83,20 +99,7 @@ Decoration {
             duration: root.animationDuration
         }
     }
-    property int borderSize: 4
     id: root
-    borderLeft: borderSize
-    borderRight: borderSize
-    borderTop: top.normalHeight
-    borderBottom: borderSize
-    borderLeftMaximized: 0
-    borderRightMaximized: 0
-    borderBottomMaximized: 0
-    borderTopMaximized: top.maximizedHeight
-    paddingLeft: 0
-    paddingRight: 0
-    paddingBottom: 0
-    paddingTop: 0
     alpha: false
     Rectangle {
         color: root.titleBarColor
@@ -118,7 +121,7 @@ Decoration {
                 topMargin: 1
             }
             visible: !decoration.maximized
-            width: root.borderLeft
+            width: root.borders.left
             color: root.titleBarColor
             Rectangle {
                 width: 1
@@ -141,7 +144,7 @@ Decoration {
                 topMargin: 1
             }
             visible: !decoration.maximzied
-            width: root.borderRight -1
+            width: root.borders.right -1
             color: root.titleBarColor
             Rectangle {
                 width: 1
@@ -162,7 +165,7 @@ Decoration {
                 leftMargin: 1
                 rightMargin: 1
             }
-            height: root.borderBottom
+            height: root.borders.bottom
             visible: !decoration.maximzied
             color: root.titleBarColor
             Rectangle {
@@ -180,7 +183,7 @@ Decoration {
             id: top
             property int topMargin: 1
             property real normalHeight: titleRow.normalHeight + topMargin + 1
-            property real maximizedHeight: titleRow.maximizedHeight
+            property real maximizedHeight: titleRow.maximizedHeight + 1
             height: decoration.maximized ? maximizedHeight : normalHeight
             anchors {
                 left: parent.left
@@ -233,8 +236,8 @@ Decoration {
             Item {
                 id: titleRow
                 property real captionHeight: caption.implicitHeight + 4
-                property int topMargin: 4
-                property int bottomMargin: 2
+                property int topMargin: 3
+                property int bottomMargin: 1
                 property real normalHeight: captionHeight + bottomMargin + topMargin
                 property real maximizedHeight: captionHeight + bottomMargin
                 anchors {
@@ -242,8 +245,8 @@ Decoration {
                     right: parent.right
                     top: parent.top
                     topMargin: decoration.maximized ? 0 : titleRow.topMargin
-                    leftMargin: decoration.maximized ? 0 : 6
-                    rightMargin: decoration.maximized ? 0 : 6
+                    leftMargin: decoration.maximized ? 0 : 3
+                    rightMargin: decoration.maximized ? 0 : 3
                     bottomMargin: titleRow.bottomMargin
                 }
                 ButtonGroup {
@@ -251,6 +254,7 @@ Decoration {
                     spacing: 1
                     explicitSpacer: root.buttonSize
                     menuButton: menuButtonComponent
+                    appMenuButton: appMenuButtonComponent
                     minimizeButton: minimizeButtonComponent
                     maximizeButton: maximizeButtonComponent
                     keepBelowButton: keepBelowButtonComponent
@@ -267,12 +271,14 @@ Decoration {
                 }
                 Text {
                     id: caption
+                    textFormat: Text.PlainText
                     anchors {
                         top: parent.top
                         left: leftButtonGroup.right
                         right: rightButtonGroup.left
                         rightMargin: 5
                         leftMargin: 5
+                        topMargin: 3
                     }
                     color: options.fontColor
                     Behavior on color {
@@ -289,6 +295,7 @@ Decoration {
                     spacing: 1
                     explicitSpacer: root.buttonSize
                     menuButton: menuButtonComponent
+                    appMenuButton: appMenuButtonComponent
                     minimizeButton: minimizeButtonComponent
                     maximizeButton: maximizeButtonComponent
                     keepBelowButton: keepBelowButtonComponent
@@ -306,20 +313,36 @@ Decoration {
             }
         }
 
-        Rectangle {
+        Item {
             id: innerBorder
-            anchors {
-                fill: parent
-                leftMargin: root.borderLeft - 1
-                rightMargin: root.borderRight
-                topMargin: root.borderTop - 1
-                bottomMargin: root.borderBottom
-            }
-            border {
-                width: 1
+            anchors.fill: parent
+
+            Rectangle {
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                }
+                height: 1
+                y: top.height - 1
+                visible: decoration.maximized
                 color: colorHelper.shade(root.titleBarColor, ColorHelper.MidShade)
             }
-            color: root.titleBarColor
+
+            Rectangle {
+                anchors {
+                    fill: parent
+                    leftMargin: root.borders.left - 1
+                    rightMargin: root.borders.right
+                    topMargin: root.borders.top - 1
+                    bottomMargin: root.borders.bottom
+                }
+                border {
+                    width: 1
+                    color: colorHelper.shade(root.titleBarColor, ColorHelper.MidShade)
+                }
+                visible: !decoration.maximized
+                color: root.titleBarColor
+            }
         }
     }
 
@@ -386,7 +409,19 @@ Decoration {
             height: root.buttonSize
         }
     }
-    Component.onCompleted: readConfig()
+    Component {
+        id: appMenuButtonComponent
+        PlastikButton {
+            buttonType: "N"
+            size: root.buttonSize
+        }
+    }
+    Component.onCompleted: {
+        borders.setBorders(4);
+        borders.setTitle(top.normalHeight);
+        maximizedBorders.setTitle(top.maximizedHeight);
+        readConfig();
+    }
     Connections {
         target: decoration
         onConfigChanged: readConfig()

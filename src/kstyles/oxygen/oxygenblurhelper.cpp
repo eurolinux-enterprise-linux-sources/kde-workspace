@@ -3,7 +3,7 @@
 // handle regions passed to kwin for blurring
 // -------------------
 //
-// Copyright (c) 2010 Hugo Pereira Da Costa <hugo@oxygen-icons.org>
+// Copyright (c) 2010 Hugo Pereira Da Costa <hugo.pereira@free.fr>
 //
 // Loosely inspired (and largely rewritten) from BeSpin style
 // Copyright (C) 2007 Thomas Luebking <thomas.luebking@web.de>
@@ -77,7 +77,7 @@ namespace Oxygen
         _widgets.insert( widget );
 
         // cleanup on destruction
-        connect( widget, SIGNAL( destroyed( QObject* ) ), SLOT( widgetDestroyed( QObject* ) ) );
+        connect( widget, SIGNAL(destroyed(QObject*)), SLOT(widgetDestroyed(QObject*)) );
 
         if( enabled() )
         {
@@ -299,7 +299,8 @@ namespace Oxygen
             ( widget->testAttribute( Qt::WA_StyledBackground ) ||
             qobject_cast<const QMenu*>( widget ) ||
             qobject_cast<const QDockWidget*>( widget ) ||
-            qobject_cast<const QToolBar*>( widget ) ) &&
+            qobject_cast<const QToolBar*>( widget ) ||
+            widget->windowType() == Qt::ToolTip ) &&
             _helper.hasAlphaChannel( widget );
     }
 

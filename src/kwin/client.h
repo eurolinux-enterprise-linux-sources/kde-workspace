@@ -22,38 +22,29 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef KWIN_CLIENT_H
 #define KWIN_CLIENT_H
 
-#include <config-X11.h>
-
-#include "config-kwin.h"
-
-#include <QFrame>
-#include <QPixmap>
-#include <netwm.h>
-#include <kdebug.h>
-#include <assert.h>
-#include <kshortcut.h>
-#include <X11/X.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <fixx11h.h>
-
-#include "utils.h"
+// kwin
 #include "options.h"
-#include "workspace.h"
-#include "kdecoration.h"
 #include "rules.h"
-#include "toplevel.h"
 #include "tabgroup.h"
-
+#include "toplevel.h"
+#include "xcbutils.h"
+// KDE
+#include <KDE/KShortcut>
+#include <KDE/NETWinInfo>
+// Qt
+#include <QPixmap>
+// X
 #ifdef HAVE_XSYNC
 #include <X11/extensions/sync.h>
 #endif
+#include <X11/Xutil.h>
+#include <fixx11h.h>
 
 // TODO: Cleanup the order of things in this .h file
 
-class QProcess;
 class QTimer;
 class KStartupInfoData;
+class KStartupInfoId;
 
 namespace KWin
 {
@@ -63,9 +54,6 @@ namespace TabBox
 class TabBoxClientImpl;
 }
 
-
-class Workspace;
-class Client;
 class Bridge;
 class PaintRedirector;
 
@@ -281,10 +269,10 @@ class Client
      **/
     Q_PROPERTY(bool decorationHasAlpha READ decorationHasAlpha)
 public:
-    Client(Workspace* ws);
-    Window wrapperId() const;
-    Window decorationId() const;
-    Window inputId() const { return input_window; }
+    explicit Client();
+    xcb_window_t wrapperId() const;
+    xcb_window_t decorationId() const;
+    xcb_window_t inputId() const { return m_decoInputExtent; }
 
     const Client* transientFor() const;
     Client* transientFor();
@@ -295,7 +283,7 @@ public:
     ClientList allMainClients() const; // Call once before loop , is indirect
     bool hasTransient(const Client* c, bool indirect) const;
     const ClientList& transients() const; // Is not indirect
-    void checkTransient(Window w);
+    void checkTransient(xcb_window_t w);
     Client* findModal(bool allow_itself = false);
     const Group* group() const;
     Group* group();
@@ -331,7 +319,7 @@ public:
 #endif
     NET::WindowType windowType(bool direct = false, int supported_types = 0) const;
 
-    bool manage(Window w, bool isMapped);
+    bool manage(xcb_window_t w, bool isMapped);
     void releaseWindow(bool on_shutdown = false);
     void destroyClient();
 
@@ -357,6 +345,8 @@ public:
     virtual int desktop() const;
     void setDesktop(int);
     void setOnAllDesktops(bool set);
+
+    void sendToScreen(int screen);
 
     virtual QStringList activities() const;
     void setOnActivity(const QString &activity, bool enable);
@@ -417,6 +407,7 @@ public:
     virtual Layer layer() const;
     Layer belongsToLayer() const;
     void invalidateLayer();
+    void updateLayer();
     int sessionStackingOrder() const;
 
     void setModal(bool modal);
@@ -431,14 +422,14 @@ public:
     bool isMovableAcrossScreens() const;
     bool isCloseable() const; ///< May be closed by the user (May have a close button)
 
-    void takeActivity(int flags, bool handled, allowed_t);   // Takes ActivityFlags as arg (in utils.h)
-    void takeFocus(allowed_t);
+    void takeActivity(int flags, bool handled);   // Takes ActivityFlags as arg (in utils.h)
+    void takeFocus();
     bool isDemandingAttention() const {
         return demands_attention;
     }
     void demandAttention(bool set = true);
 
-    void setMask(const QRegion& r, int mode = X::Unsorted);
+    void setMask(const QRegion& r, int mode = XCB_CLIP_ORDERING_UNSORTED);
     QRegion mask() const;
 
     void updateDecoration(bool check_workspace_pos, bool force = false);
@@ -485,7 +476,7 @@ public:
 
     QRect adjustedClientArea(const QRect& desktop, const QRect& area) const;
 
-    Colormap colormap() const;
+    xcb_colormap_t colormap() const;
 
     /// Updates visibility depending on being shaded, virtual desktop, etc.
     void updateVisibility();
@@ -503,28 +494,28 @@ public:
 
     void keyPressEvent(uint key_code);   // FRAME ??
     void updateMouseGrab();
-    Window moveResizeGrabWindow() const;
+    xcb_window_t moveResizeGrabWindow() const;
 
     const QPoint calculateGravitation(bool invert, int gravity = 0) const;   // FRAME public?
 
     void NETMoveResize(int x_root, int y_root, NET::Direction direction);
     void NETMoveResizeWindow(int flags, int x, int y, int width, int height);
-    void restackWindow(Window above, int detail, NET::RequestSource source, Time timestamp,
+    void restackWindow(xcb_window_t above, int detail, NET::RequestSource source, xcb_timestamp_t timestamp,
                        bool send_event = false);
 
-    void gotPing(Time timestamp);
+    void gotPing(xcb_timestamp_t timestamp);
 
     void checkWorkspacePosition(QRect oldGeometry = QRect(), int oldDesktop = -2);
-    void updateUserTime(Time time = CurrentTime);
-    Time userTime() const;
+    void updateUserTime(xcb_timestamp_t time = XCB_TIME_CURRENT_TIME);
+    xcb_timestamp_t userTime() const;
     bool hasUserTimeSupport() const;
 
     /// Does 'delete c;'
-    static void deleteClient(Client* c, allowed_t);
+    static void deleteClient(Client* c);
 
     static bool belongToSameApplication(const Client* c1, const Client* c2, bool active_hack = false);
     static bool sameAppWindowRoleMatch(const Client* c1, const Client* c2, bool active_hack);
-    static void readIcons(Window win, QPixmap* icon, QPixmap* miniicon, QPixmap* bigicon, QPixmap* hugeicon);
+    static void readIcons(xcb_window_t win, QPixmap* icon, QPixmap* miniicon, QPixmap* bigicon, QPixmap* hugeicon);
 
     void setMinimized(bool set);
     void minimize(bool avoid_animation = false);
@@ -615,6 +606,8 @@ public:
 
     bool decorationHasAlpha() const;
 
+    Position titlebarPosition() const;
+
     enum CoordinateMode {
         DecorationRelative, // Relative to the top left corner of the decoration
         WindowRelative      // Relative to the top left corner of the window
@@ -635,6 +628,8 @@ public:
     //sets whether the client should be treated as a SessionInteract window
     void setSessionInteract(bool needed);
     virtual bool isClient() const;
+    // a helper for the workspace window packing. tests for screen validity and updates since in maximization case as with normal moving
+    void packTo(int left, int top);
 
 #ifdef KWIN_BUILD_KAPPMENU
     // Used by workspace
@@ -651,6 +646,9 @@ public:
         return m_menuAvailable;
     }
 #endif
+
+    template <typename T>
+    void print(T &stream) const;
 
 public slots:
     void closeWindow();
@@ -685,11 +683,11 @@ private:
     void leaveNotifyEvent(XCrossingEvent* e);
     void focusInEvent(XFocusInEvent* e);
     void focusOutEvent(XFocusOutEvent* e);
-    virtual void damageNotifyEvent(XDamageNotifyEvent* e);
+    virtual void damageNotifyEvent();
 
-    bool buttonPressEvent(Window w, int button, int state, int x, int y, int x_root, int y_root);
-    bool buttonReleaseEvent(Window w, int button, int state, int x, int y, int x_root, int y_root);
-    bool motionNotifyEvent(Window w, int state, int x, int y, int x_root, int y_root);
+    bool buttonPressEvent(xcb_window_t w, int button, int state, int x, int y, int x_root, int y_root);
+    bool buttonReleaseEvent(xcb_window_t w, int button, int state, int x, int y, int x_root, int y_root);
+    bool motionNotifyEvent(xcb_window_t w, int state, int x, int y, int x_root, int y_root);
     void checkQuickTilingMaximizationZones(int xroot, int yroot);
 
     bool processDecorationButtonPress(int button, int state, int x, int y, int x_root, int y_root,
@@ -706,7 +704,6 @@ private slots:
     void performMoveResize();
     void removeSyncSupport();
     void pingTimeout();
-    void demandAttentionKNotify();
 
     //Signals for the scripting interface
     //Signals make an excellent way for communication
@@ -725,12 +722,13 @@ signals:
     void activeChanged();
     void captionChanged();
     void desktopChanged();
+    void desktopPresenceChanged(KWin::Client*, int); // to be forwarded by Workspace
     void fullScreenChanged();
     void transientChanged();
     void modalChanged();
     void shadeChanged();
-    void keepAboveChanged();
-    void keepBelowChanged();
+    void keepAboveChanged(bool);
+    void keepBelowChanged(bool);
     void minimizedChanged();
     void moveResizedChanged();
     void iconChanged();
@@ -805,30 +803,31 @@ private:
     void grabButton(int mod);
     void ungrabButton(int mod);
     void resizeDecoration(const QSize& s);
+    void createDecoration(const QRect &oldgeom);
 
     void pingWindow();
-    void killProcess(bool ask, Time timestamp = CurrentTime);
+    void killProcess(bool ask, xcb_timestamp_t timestamp = XCB_TIME_CURRENT_TIME);
     void updateUrgency();
-    static void sendClientMessage(Window w, Atom a, Atom protocol,
+    static void sendClientMessage(xcb_window_t w, xcb_atom_t a, xcb_atom_t protocol,
                                   long data1 = 0, long data2 = 0, long data3 = 0);
 
-    void embedClient(Window w, const XWindowAttributes& attr);
+    void embedClient(xcb_window_t w, const XWindowAttributes& attr);
     void detectNoBorder();
     void destroyDecoration();
     void updateFrameExtents();
 
-    void internalShow(allowed_t);
-    void internalHide(allowed_t);
-    void internalKeep(allowed_t);
-    void map(allowed_t);
-    void unmap(allowed_t);
+    void internalShow();
+    void internalHide();
+    void internalKeep();
+    void map();
+    void unmap();
     void updateHiddenPreview();
 
     void updateInputShape();
 
-    Time readUserTimeMapTimestamp(const KStartupInfoId* asn_id, const KStartupInfoData* asn_data,
+    xcb_timestamp_t readUserTimeMapTimestamp(const KStartupInfoId* asn_id, const KStartupInfoData* asn_data,
                                   bool session) const;
-    Time readUserCreationTime() const;
+    xcb_timestamp_t readUserCreationTime() const;
     void startupIdChanged();
 
     void checkOffscreenPosition (QRect* geom, const QRect& screenArea);
@@ -837,8 +836,8 @@ private:
 
     bool tabTo(Client *other, bool behind, bool activate);
 
-    Window client;
-    Window wrapper;
+    xcb_window_t m_client;
+    Xcb::Window m_wrapper;
     KDecoration* decoration;
     Bridge* bridge;
     int desk;
@@ -847,7 +846,7 @@ private:
     bool m_blockedActivityUpdatesRequireTransients;
     bool buttonDown;
     bool moveResizeMode;
-    Window move_resize_grab_window;
+    Xcb::Window m_moveResizeGrabWindow;
     bool move_resize_has_keyboard_grab;
     bool unrestrictedMoveResize;
     int moveResizeStartScreen;
@@ -874,16 +873,16 @@ private:
     int quick_tile_mode;
 
     void readTransient();
-    Window verifyTransientFor(Window transient_for, bool set);
+    xcb_window_t verifyTransientFor(xcb_window_t transient_for, bool set);
     void addTransient(Client* cl);
     void removeTransient(Client* cl);
     void removeFromMainClients();
     void cleanGrouping();
     void checkGroupTransients();
-    void setTransient(Window new_transient_for_id);
+    void setTransient(xcb_window_t new_transient_for_id);
     Client* transient_for;
-    Window transient_for_id;
-    Window original_transient_for_id;
+    xcb_window_t m_transientForId;
+    xcb_window_t m_originalTransientForId;
     ClientList transients_list; // SELI TODO: Make this ordered in stacking order?
     ShadeMode shade_mode;
     Client *shade_below;
@@ -922,7 +921,7 @@ private:
     QPixmap miniicon_pix;
     QPixmap bigicon_pix;
     QPixmap hugeicon_pix;
-    QCursor cursor;
+    Qt::CursorShape m_cursor;
     // DON'T reorder - Saved to config files !!!
     enum FullScreenMode {
         FullScreenNone,
@@ -936,16 +935,16 @@ private:
     QTimer* autoRaiseTimer;
     QTimer* shadeHoverTimer;
     QTimer* delayedMoveResizeTimer;
-    Colormap cmap;
+    xcb_colormap_t m_colormap;
     QString cap_normal, cap_iconic, cap_suffix, cap_deco;
     Group* in_group;
-    Window window_group;
+    xcb_window_t m_windowGroup;
     TabGroup* tab_group;
     Layer in_layer;
     QTimer* ping_timer;
     qint64 m_killHelperPID;
-    Time ping_timestamp;
-    Time user_time;
+    xcb_timestamp_t m_pingTimestamp;
+    xcb_timestamp_t m_userTime;
     unsigned long allowed_actions;
     QSize client_size;
     int block_geometry_updates; // > 0 = New geometry is remembered, but not actually set
@@ -976,7 +975,6 @@ private:
     friend struct FetchNameInternalPredicate;
     friend struct ResetupRulesProcedure;
     friend class GeometryUpdatesBlocker;
-    QTimer* demandAttentionKNotifyTimer;
     PaintRedirector* paintRedirector;
     QSharedPointer<TabBox::TabBoxClientImpl> m_tabBoxClient;
     bool m_firstInTabBox;
@@ -995,7 +993,7 @@ private:
 #ifdef KWIN_BUILD_KAPPMENU
     bool m_menuAvailable;
 #endif
-    Window input_window;
+    Xcb::Window m_decoInputExtent;
     QPoint input_offset;
 };
 
@@ -1005,7 +1003,7 @@ private:
 class GeometryUpdatesBlocker
 {
 public:
-    GeometryUpdatesBlocker(Client* c)
+    explicit GeometryUpdatesBlocker(Client* c)
         : cl(c) {
         cl->blockGeometryUpdates(true);
     }
@@ -1017,34 +1015,17 @@ private:
     Client* cl;
 };
 
-/**
- * NET WM Protocol handler class
- */
-class WinInfo : public NETWinInfo2
+inline xcb_window_t Client::wrapperId() const
 {
-private:
-    typedef KWin::Client Client; // Because of NET::Client
-
-public:
-    WinInfo(Client* c, Display * display, Window window,
-            Window rwin, const unsigned long pr[], int pr_size);
-    virtual void changeDesktop(int desktop);
-    virtual void changeFullscreenMonitors(NETFullscreenMonitors topology);
-    virtual void changeState(unsigned long state, unsigned long mask);
-    void disable();
-
-private:
-    Client * m_client;
-};
-
-inline Window Client::wrapperId() const
-{
-    return wrapper;
+    return m_wrapper;
 }
 
-inline Window Client::decorationId() const
+inline xcb_window_t Client::decorationId() const
 {
-    return decoration != NULL ? decoration->widget()->winId() : None;
+    if (decoration) {
+        return decoration->widget()->winId();
+    }
+    return XCB_WINDOW_NONE;
 }
 
 inline const Client* Client::transientFor() const
@@ -1059,19 +1040,19 @@ inline Client* Client::transientFor()
 
 inline bool Client::groupTransient() const
 {
-    return transient_for_id == rootWindow();
+    return m_transientForId == rootWindow();
 }
 
 // Needed because verifyTransientFor() may set transient_for_id to root window,
 // if the original value has a problem (window doesn't exist, etc.)
 inline bool Client::wasOriginallyGroupTransient() const
 {
-    return original_transient_for_id == rootWindow();
+    return m_originalTransientForId == rootWindow();
 }
 
 inline bool Client::isTransient() const
 {
-    return transient_for_id != None;
+    return m_transientForId != XCB_WINDOW_NONE;
 }
 
 inline const ClientList& Client::transients() const
@@ -1155,9 +1136,9 @@ inline Client::MaximizeMode Client::maximizeMode() const
     return max_mode;
 }
 
-inline KWin::QuickTileMode Client::quickTileMode() const
+inline Client::QuickTileMode Client::quickTileMode() const
 {
-    return (KWin::QuickTileMode)quick_tile_mode;
+    return (Client::QuickTileMode)quick_tile_mode;
 }
 
 inline bool Client::skipTaskbar(bool from_outside) const
@@ -1200,9 +1181,9 @@ inline bool Client::hasNETSupport() const
     return info->hasNETSupport();
 }
 
-inline Colormap Client::colormap() const
+inline xcb_colormap_t Client::colormap() const
 {
-    return cmap;
+    return m_colormap;
 }
 
 inline void Client::invalidateLayer()
@@ -1260,9 +1241,9 @@ inline const WindowRules* Client::rules() const
     return &client_rules;
 }
 
-inline Window Client::moveResizeGrabWindow() const
+inline xcb_window_t Client::moveResizeGrabWindow() const
 {
-    return move_resize_grab_window;
+    return m_moveResizeGrabWindow;
 }
 
 inline KShortcut Client::shortcut() const
@@ -1278,6 +1259,13 @@ inline void Client::removeRule(Rules* rule)
 inline bool Client::hiddenPreview() const
 {
     return mapping_state == Kept;
+}
+
+template <typename T>
+inline void Client::print(T &stream) const
+{
+    stream << "\'ID:" << window() << ";WMCLASS:" << resourceClass() << ":"
+           << resourceName() << ";Caption:" << caption() << "\'";
 }
 
 KWIN_COMPARE_PREDICATE(WrapperIdMatchPredicate, Client, Window, cl->wrapperId() == value);

@@ -25,7 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <kwineffects.h>
 
-#include <klocale.h>
+#include <KDE/KLocalizedString>
 #include <kdebug.h>
 #include <KActionCollection>
 #include <kaction.h>
@@ -52,6 +52,8 @@ ZoomEffectConfig::ZoomEffectConfig(QWidget* parent, const QVariantList& args) :
     layout->addWidget(m_ui);
 
     addConfig(ZoomConfig::self(), m_ui);
+
+    connect(m_ui->editor, SIGNAL(keyChange()), this, SLOT(changed()));
 
     // Shortcut config. The shortcut belongs to the component "kwin"!
     KActionCollection *actionCollection = new KActionCollection(this, KComponentData("kwin"));

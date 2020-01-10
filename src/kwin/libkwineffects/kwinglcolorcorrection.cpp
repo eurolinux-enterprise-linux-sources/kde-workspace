@@ -34,27 +34,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QPair>
 #include <QVector3D>
 
-#ifdef KWIN_HAVE_OPENGLES
-#define CC_TEXTURE_INTERNAL_FORMAT GL_RGB
-
-/*
- * A bit of ugliness to allow building with OpenGL ES < 3, without
- * ifdef's everywhere in the code. These should not actually be used anywhere.
- */
-#ifndef GL_TEXTURE_3D
-#define GL_TEXTURE_3D              0x806F    // From OES_texture_3D extension
-#define GL_TEXTURE_WRAP_R          0x8072    // From OES_texture_3D extension
-void glTexImage3D(GLenum, int, GLenum, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *)
-{
-    Q_ASSERT(false); // Execution must not reach here
-}
-#endif // defined(GL_TEXTURE_3D)
-
-#else  // KWIN_HAVE_OPENGLES
-#define CC_TEXTURE_INTERNAL_FORMAT GL_RGB16
-#endif // KWIN_HAVE_OPENGLES
-
-
 namespace KWin {
 
 /*
@@ -235,7 +214,9 @@ void ColorServerInterface::callFinishedSlot(QDBusPendingCallWatcher *watcher)
 static const char s_ccVars[] =
     "uniform sampler3D u_ccLookupTexture;\n";
 static const char s_ccAlteration[] =
-    "gl_FragColor.rgb = texture3D(u_ccLookupTexture, gl_FragColor.rgb / gl_FragColor.a).rgb;\n";
+    "gl_FragColor.rgb = texture3D(u_ccLookupTexture, gl_FragColor.rgb / gl_FragColor.a).rgb * gl_FragColor.a;\n";
+static const char s_ccAlteration_140[] =
+    "fragColor.rgb = texture(u_ccLookupTexture, fragColor.rgb / fragColor.a).rgb * fragColor.a;\n";
 
 
 /*
@@ -246,7 +227,7 @@ ColorCorrection::ColorCorrection(QObject *parent)
     : QObject(parent)
     , d_ptr(new ColorCorrectionPrivate(this))
 {
-
+    connect(this, SIGNAL(errorOccured()), this, SIGNAL(changed()));
 }
 
 ColorCorrection::~ColorCorrection()
@@ -258,6 +239,7 @@ ColorCorrectionPrivate::ColorCorrectionPrivate(ColorCorrection *parent)
     : QObject(parent)
     , m_enabled(false)
     , m_hasError(false)
+    , m_duringEnablingPhase(false)
     , m_ccTextureUnit(-1)
     , m_dummyCCTexture(0)
     , m_lastOutput(-1)
@@ -284,54 +266,87 @@ ColorCorrectionPrivate::~ColorCorrectionPrivate()
 
 }
 
-void ColorCorrection::setEnabled(bool enabled)
+bool ColorCorrection::isEnabled() const
+{
+    Q_D(const ColorCorrection);
+    return d->m_enabled;
+}
+
+bool ColorCorrection::setEnabled(bool enabled)
 {
     Q_D(ColorCorrection);
 
     if (enabled == d->m_enabled)
-        return;
+        return true;
 
     if (enabled && d->m_hasError) {
-        kError(1212) << "cannot enable color correction";
-        return;
+        kError(1212) << "cannot enable color correction because of a previous error";
+        return false;
     }
 
+#ifdef KWIN_HAVE_OPENGLES
     const GLPlatform *gl = GLPlatform::instance();
-    if (enabled && gl->isGLES() && (gl->glVersion() >> 32) < 3) {
-        kError(1212) << "color correction is not supported with OpenGL ES < 3.0";
-        return;
+    if (enabled && gl->isGLES() && glTexImage3D == 0) {
+        kError(1212) << "color correction is not supported on OpenGL ES without OES_texture_3D";
+        d->m_hasError = true;
+        return false;
     }
+#endif // KWIN_HAVE_OPENGLES
 
     if (enabled) {
         // Update all profiles and regions
         d->m_csi->update();
+        kDebug(1212) << "color correction will be enabled after contacting KolorManager";
+        d->m_duringEnablingPhase = true;
+        // d->m_enabled will be set to true in colorServerUpdateSucceededSlot()
     } else {
         d->deleteCCTextures();
+        d->m_enabled = false;
+        GLShader::sColorCorrect = false;
+        kDebug(1212) << "color correction has been disabled";
+
+        // Reload all shaders
+        ShaderManager::cleanup();
+        ShaderManager::instance();
     }
 
-    d->m_enabled = enabled;
-    GLShader::sColorCorrect = enabled;
-    kDebug(1212) << enabled;
+    return true;
 }
 
 void ColorCorrection::setupForOutput(int screen)
 {
     Q_D(ColorCorrection);
 
+    if (!d->m_enabled || d->m_hasError)
+        return;
+
     GLShader *shader = ShaderManager::instance()->getBoundShader();
     if (!shader) {
         kError(1212) << "no bound shader for color correction setup";
+        d->m_hasError = true;
+        emit errorOccured();
         return;
     }
 
-    if (!shader->setUniform("u_ccLookupTexture", d->m_ccTextureUnit)) {
-        // This means the color correction shaders are probably not loaded
-        if (!d->m_enabled)
-            return;
-        kError(1212) << "unable to set uniform for the color correction lookup texture";
+    if (d->m_ccTextureUnit < 0) {
+        GLint maxUnits = 0;
+        glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &maxUnits);
+        d->m_ccTextureUnit = maxUnits - 1;
     }
 
-    d->setupCCTextures();
+    if (!shader->setUniform(GLShader::ColorCorrectionLookupTextureUnit, d->m_ccTextureUnit)) {
+        kError(1212) << "unable to set uniform for the color correction lookup texture";
+        d->m_hasError = true;
+        emit errorOccured();
+        return;
+    }
+
+    if (!d->setupCCTextures()) {
+        kError(1212) << "unable to setup color correction textures";
+        d->m_hasError = true;
+        emit errorOccured();
+        return;
+    }
 
     GLint activeTexture;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
@@ -342,13 +357,11 @@ void ColorCorrection::setupForOutput(int screen)
         Q_ASSERT(d->m_dummyCCTexture != 0);
         glBindTexture(GL_TEXTURE_3D, d->m_dummyCCTexture);
     } else {
-        // Everything looks ok, configure with the proper color correctiont texture
+        // Everything looks ok, configure with the proper color correction texture
         glBindTexture(GL_TEXTURE_3D, d->m_outputCCTextures[screen]);
     }
 
     glActiveTexture(activeTexture);
-
-    checkGLError("setupForOutput");
 
     d->m_lastOutput = screen;
 }
@@ -511,7 +524,10 @@ QByteArray ColorCorrection::prepareFragmentShader(const QByteArray &sourceCode)
      * the color correction code at the end of the main function.
      * Need to handle return "jumps" inside the main function.
      */
-    mainFunc.insert(mainFunc.size() - 1, s_ccAlteration);
+    if (GLPlatform::instance()->glslVersion() >= kVersionNumber(1, 40))
+        mainFunc.insert(mainFunc.size() - 1, s_ccAlteration_140);
+    else
+        mainFunc.insert(mainFunc.size() - 1, s_ccAlteration);
     mainFunc.insert(0, s_ccVars);
 
     // Search for return statements inside the main function
@@ -533,19 +549,24 @@ QByteArray ColorCorrection::prepareFragmentShader(const QByteArray &sourceCode)
     return cfSource;
 }
 
-void ColorCorrectionPrivate::setupCCTextures()
+bool ColorCorrectionPrivate::setupCCTextures()
 {
-    if (m_ccTextureUnit < 0) {
-        GLint maxUnits = 0;
-        glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &maxUnits);
-        m_ccTextureUnit = maxUnits - 1;
+    if (!m_enabled || m_hasError) {
+        kWarning(1212) << "Color correction not enabled or an error occurred, refusing to set up textures";
+        return false;
     }
 
     // Dummy texture first
     if (!m_dummyCCTexture) {
         glGenTextures(1, &m_dummyCCTexture);
-        setupCCTexture(m_dummyCCTexture, m_dummyClut);
+        if (!setupCCTexture(m_dummyCCTexture, m_dummyClut)) {
+            kError(1212) << "unable to setup dummy color correction texture";
+            m_dummyCCTexture = 0;
+            return false;
+        }
     }
+
+    bool success = true;
 
     // Setup actual color correction textures
     if (m_outputCCTextures.isEmpty() && !m_outputCluts->isEmpty()) {
@@ -556,15 +577,20 @@ void ColorCorrectionPrivate::setupCCTextures()
         glGenTextures(outputCount, m_outputCCTextures.data());
 
         for (int i = 0; i < outputCount; ++i)
-            setupCCTexture(m_outputCCTextures[i], m_outputCluts->at(i));
+            if (!setupCCTexture(m_outputCCTextures[i], m_outputCluts->at(i))) {
+                kError(1212) << "unable to set up color correction texture for output" << i;
+                success = false;
+            }
     }
 
-    // TODO Handle errors (what if a texture isn't generated?)
-    checkGLError("setupCCTextures");
+    return success;
 }
 
-void ColorCorrectionPrivate::deleteCCTextures()
+bool ColorCorrectionPrivate::deleteCCTextures()
 {
+    // Clear any previous GL errors
+    checkGLError("deleteCCTextures-clearErrors");
+
     // Delete dummy texture
     if (m_dummyCCTexture) {
         glDeleteTextures(1, &m_dummyCCTexture);
@@ -577,17 +603,18 @@ void ColorCorrectionPrivate::deleteCCTextures()
         m_outputCCTextures.clear();
     }
 
-    checkGLError("deleteCCTextures");
+    return !checkGLError("deleteCCTextures");
 }
 
-void ColorCorrectionPrivate::setupCCTexture(GLuint texture, const Clut& clut)
+bool ColorCorrectionPrivate::setupCCTexture(GLuint texture, const Clut& clut)
 {
     if ((uint) clut.size() != CLUT_ELEMENT_COUNT) {
         kError(1212) << "cannot setup CC texture: invalid color lookup table";
-        return;
+        return false;
     }
 
-    kDebug(1212) << texture;
+    // Clear any previous GL errors
+    checkGLError("setupCCTexture-clearErrors");
 
     glBindTexture(GL_TEXTURE_3D, texture);
 
@@ -597,12 +624,24 @@ void ColorCorrectionPrivate::setupCCTexture(GLuint texture, const Clut& clut)
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
-    glTexImage3D(GL_TEXTURE_3D, 0, CC_TEXTURE_INTERNAL_FORMAT,
+#ifndef KWIN_HAVE_OPENGLES
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGB16,
                  LUT_GRID_POINTS, LUT_GRID_POINTS, LUT_GRID_POINTS,
                  0, GL_RGB, GL_UNSIGNED_SHORT, clut.data());
+#else
+    const int textureDataSize = clut.size();
+    QVector<quint8> textureData(textureDataSize);
+    quint8 *pTextureData = textureData.data();
+    const quint16 *pClutData = clut.data();
+    for (int i = 0; i < textureDataSize; ++i)
+        *(pTextureData++) = *(pClutData++) >> 8;
 
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGB,
+                 LUT_GRID_POINTS, LUT_GRID_POINTS, LUT_GRID_POINTS,
+                 0, GL_RGB, GL_UNSIGNED_BYTE, textureData.data());
+#endif // KWIN_HAVE_OPENGLES
 
-    checkGLError("setupCCTexture");
+    return !checkGLError("setupCCTexture");
 }
 
 void ColorCorrectionPrivate::colorServerUpdateSucceededSlot()
@@ -614,6 +653,27 @@ void ColorCorrectionPrivate::colorServerUpdateSucceededSlot()
     // Force the color correction textures to be recreated
     deleteCCTextures();
 
+    // If this is reached after enabling color correction using ColorCorrection::setEnabled(true)
+    if (m_duringEnablingPhase) {
+        m_duringEnablingPhase = false;
+        m_enabled = true;
+        GLShader::sColorCorrect = true;
+        kDebug(1212) << "Color correction has been enabled";
+
+        // Reload all shaders
+        ShaderManager::cleanup();
+        if (!ShaderManager::instance()->isValid()) {
+            kError(1212) << "Shader reinitialization failed, possible compile problems with the shaders "
+                "altered for color-correction";
+            m_hasError = true;
+            kDebug(1212) << "Color correction has been disabled due to shader issues";
+            m_enabled = false;
+            GLShader::sColorCorrect = false;
+            ShaderManager::cleanup();
+            ShaderManager::instance();
+        }
+    }
+
     emit q->changed();
 }
 
@@ -621,9 +681,11 @@ void ColorCorrectionPrivate::colorServerUpdateFailedSlot()
 {
     Q_Q(ColorCorrection);
 
-    kError(1212) << "Update of color profiles failed";
+    m_duringEnablingPhase = false;
 
-    q->setEnabled(false);
+    kError(1212) << "Update of color profiles failed";
+    m_hasError = true;
+    emit q->errorOccured();
 }
 
 } // KWin namespace

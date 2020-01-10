@@ -31,12 +31,14 @@ class HandleButtonEvents : public PowerDevil::Action
 {
     Q_OBJECT
     Q_DISABLE_COPY(HandleButtonEvents)
+    Q_CLASSINFO("D-Bus Interface", "org.kde.Solid.PowerManagement.Actions.HandleButtonEvents")
 
 public:
     explicit HandleButtonEvents(QObject* parent);
     virtual ~HandleButtonEvents();
 
     virtual bool loadAction(const KConfigGroup& config);
+    virtual bool isSupported();
 
 protected:
     virtual void triggerImpl(const QVariantMap& args);
@@ -45,8 +47,14 @@ protected:
     virtual void onIdleTimeout(int msec);
     virtual void onProfileLoad();
 
+public Q_SLOTS:
+    int lidAction() const;
+
 private Q_SLOTS:
     void onButtonPressed(PowerDevil::BackendInterface::ButtonType type);
+    void powerOffButtonTriggered();
+    void suspendToRam();
+    void suspendToDisk();
 
 private:
     void processAction(uint action, bool isExplicit);
@@ -54,6 +62,8 @@ private:
 
     uint m_lidAction;
     uint m_powerButtonAction;
+    uint m_sleepButtonAction;
+    uint m_hibernateButtonAction;
 };
 
 }

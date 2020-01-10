@@ -49,7 +49,7 @@ class CalculatorRunner : public Plasma::AbstractRunner
         void userFriendlySubstitutions(QString& cmd);
         void powSubstitutions(QString& cmd);
         void hexSubstitutions(QString& cmd);
- 
+
         #ifdef ENABLE_QALCULATE
         QalculateEngine* m_engine;
         #endif

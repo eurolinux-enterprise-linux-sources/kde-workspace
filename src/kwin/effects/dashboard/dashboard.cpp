@@ -35,8 +35,8 @@ DashboardEffect::DashboardEffect()
     , deactivateAnimation(false)
     , window(NULL)
 {
-    // propagate that the effect is loaded
-    propagate();
+    // TODO: better namespacing for atoms
+    atom = effects->announceSupportProperty("_WM_EFFECT_KDE_DASHBOARD", this);
 
     // read settings
     reconfigure(ReconfigureAll);
@@ -47,33 +47,18 @@ DashboardEffect::DashboardEffect()
 
 DashboardEffect::~DashboardEffect()
 {
-    unpropagate();
-}
-
-void DashboardEffect::propagate()
-{
-    // TODO: better namespacing for atoms
-    atom = XInternAtom(display(), "_WM_EFFECT_KDE_DASHBOARD", false);
-    effects->registerPropertyType(atom, true);
-
-    // TODO: maybe not the best way to propagate the loaded effect
-    unsigned char dummy = 0;
-    XChangeProperty(display(), rootWindow(), atom, atom, 8, PropModeReplace, &dummy, 1);
-}
-
-void DashboardEffect::unpropagate()
-{
-    effects->registerPropertyType(atom, false);
-    XDeleteProperty(display(), rootWindow(), atom);
 }
 
 void DashboardEffect::reconfigure(ReconfigureFlags)
 {
+    DashboardConfig::self()->readConfig();
     brightness = DashboardConfig::brightness()/ 100.0;
     saturation = DashboardConfig::saturation()/ 100.0;
     blur = DashboardConfig::blur();
 
     timeline.setDuration(animationTime<DashboardConfig>(500));
+    if (transformWindow)
+        effects->addRepaintFull();
 }
 
 void DashboardEffect::paintWindow(EffectWindow* w, int mask, QRegion region, WindowPaintData& data)

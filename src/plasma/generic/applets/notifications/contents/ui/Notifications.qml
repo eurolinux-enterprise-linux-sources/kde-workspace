@@ -31,7 +31,17 @@ Column {
         right: parent.right
     }
 
-    function addNotification(source, appIcon, image, appName, summary, body, expireTimeout, urgency, actions) {
+    function addNotification(source, appIcon, image, appName, summary, body, expireTimeout, urgency, appRealName, configurable, actions) {
+        // Do not show duplicated notifications
+        for (var i = 0; i < notificationsModel.count; ++i) {
+            if (notificationsModel.get(i).source == source &&
+                notificationsModel.get(i).appName == appName &&
+                notificationsModel.get(i).summary == summary &&
+                notificationsModel.get(i).body == body) {
+                return
+            }
+        }
+
         for (var i = 0; i < notificationsModel.count; ++i) {
             if (notificationsModel.get(i).source == source) {
                 notificationsModel.remove(i)
@@ -49,8 +59,12 @@ Column {
                 "body"    : body,
                 "expireTimeout": expireTimeout,
                 "urgency" : urgency,
+                "configurable": configurable,
+                "appRealName": appRealName,
                 "actions" : actions}
+        notificationsModel.inserting = true;
         notificationsModel.insert(0, notification);
+        notificationsModel.inserting = false;
         if (plasmoid.popupShowing) {
             return
         }
@@ -74,6 +88,19 @@ Column {
         }
     }
 
+    function configureNotification(appRealName) {
+      var service = notificationsSource.serviceForSource("notification")
+      var op = service.operationDescription("configureNotification")
+      op["appRealName"] = appRealName;
+      service.startOperationCall(op)
+    }
+
+    function closeNotification(source) {
+      var service = notificationsSource.serviceForSource(source)
+      var op = service.operationDescription("userClosed")
+      service.startOperationCall(op)
+    }
+
     property QtObject lastNotificationPopup
     Component {
         id: lastNotificationPopupComponent
@@ -83,6 +110,7 @@ Column {
 
     ListModel {
         id: notificationsModel
+        property bool inserting: false;
     }
     ListModel {
         id: allApplicationsModel
@@ -151,6 +179,8 @@ Column {
                     data["body"],
                     data["expireTimeout"],
                     data["urgency"],
+                    data["appRealName"],
+                    data["configurable"],
                     actions)
         }
 

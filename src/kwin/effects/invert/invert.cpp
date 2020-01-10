@@ -25,7 +25,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <kwinglplatform.h>
 #include <kactioncollection.h>
 #include <kaction.h>
-#include <klocale.h>
+#include <KDE/KGlobal>
+#include <KDE/KLocalizedString>
 #include <kdebug.h>
 #include <KStandardDirs>
 
@@ -55,6 +56,7 @@ InvertEffect::InvertEffect()
     b->setGlobalShortcut(KShortcut(Qt::CTRL + Qt::META + Qt::Key_U));
     connect(b, SIGNAL(triggered(bool)), this, SLOT(toggleWindow()));
     connect(effects, SIGNAL(windowClosed(KWin::EffectWindow*)), this, SLOT(slotWindowClosed(KWin::EffectWindow*)));
+    connect(effects, SIGNAL(screenGeometryChanged(const QSize&)), this, SLOT(resetShader()));
 }
 
 InvertEffect::~InvertEffect()
@@ -71,7 +73,15 @@ bool InvertEffect::loadData()
 {
     m_inited = true;
 
-    const QString fragmentshader =  KGlobal::dirs()->findResource("data", "kwin/invert.frag");
+    QString shadersDir = "kwin/shaders/1.10/";
+#ifdef KWIN_HAVE_OPENGLES
+    const qint64 coreVersionNumber = kVersionNumber(3, 0);
+#else
+    const qint64 coreVersionNumber = kVersionNumber(1, 40);
+#endif
+    if (GLPlatform::instance()->glslVersion() >= coreVersionNumber)
+        shadersDir = "kwin/shaders/1.40/";
+    const QString fragmentshader =  KGlobal::dirs()->findResource("data", shadersDir + "invert.frag");
 
     m_shader = ShaderManager::instance()->loadFragmentShader(ShaderManager::GenericShader, fragmentshader);
     if (!m_shader->isValid()) {
@@ -164,6 +174,11 @@ bool InvertEffect::isActive() const
 bool InvertEffect::provides(Feature f)
 {
     return f == ScreenInversion;
+}
+
+void InvertEffect::resetShader()
+{
+    ShaderManager::instance()->resetShader(m_shader, ShaderManager::GenericShader);
 }
 
 } // namespace

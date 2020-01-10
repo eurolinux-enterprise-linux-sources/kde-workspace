@@ -338,6 +338,9 @@ void PanelView::setContainment(Plasma::Containment *containment)
     if (m_visibilityMode != NormalPanel && m_visibilityMode != WindowsGoBelow) {
         checkUnhide(containment->status());
     }
+
+    // disable removing widgets from the context menu
+    containment->setProperty("hideCloseAppletInContextMenu", true);
 }
 
 void PanelView::themeChanged()
@@ -873,7 +876,7 @@ void PanelView::togglePanelController()
         connect(m_panelController, SIGNAL(panelVisibilityModeChanged(PanelView::VisibilityMode)), this, SLOT(setVisibilityMode(PanelView::VisibilityMode)));
 
         if (containment()->containmentType() == Plasma::Containment::PanelContainment && 
-	    dynamic_cast<QGraphicsLinearLayout*>(containment()->layout())) {
+            dynamic_cast<QGraphicsLinearLayout*>(containment()->layout())) {
             setTabOrder(0, m_panelController);
             QWidget *prior = m_panelController;
 
@@ -917,6 +920,8 @@ void PanelView::togglePanelController()
         kDebug() << "showing panel controller!" << m_panelController->geometry();
         m_panelController->show();
     }
+
+    containment()->setProperty("hideCloseAppletInContextMenu", false);
 }
 
 void PanelView::editingComplete()
@@ -932,6 +937,7 @@ void PanelView::editingComplete()
     }
 
     containment()->closeToolBox();
+    containment()->setProperty("hideCloseAppletInContextMenu", true);
     updateStruts();
 
     if (m_visibilityMode == LetWindowsCover || m_visibilityMode == AutoHide) {
@@ -1121,6 +1127,8 @@ void PanelView::showWidgetExplorer()
     } else {
         m_panelController->showWidgetExplorer();
     }
+
+    containment()->setProperty("hideCloseAppletInContextMenu", false);
 }
 
 void PanelView::moveEvent(QMoveEvent *event)
@@ -1389,6 +1397,8 @@ void PanelView::startAutoHide()
         m_mousePollTimer->stop();
         disconnect(m_mousePollTimer, SIGNAL(timeout()), this, SLOT(startAutoHide()));
     }
+
+    updatePanelGeometry();
 
     if (m_visibilityMode == LetWindowsCover) {
         KWindowSystem::setState(winId(), NET::KeepBelow);

@@ -12,6 +12,7 @@ set(POWERDEVIL_CORE_VERSION_STRING ${POWERDEVIL_CORE_VERSION_MAJOR}.${POWERDEVIL
 set(powerdevil_bundled_actions_SRCS
     actions/bundled/suspendsession.cpp
     actions/bundled/brightnesscontrol.cpp
+    actions/bundled/keyboardbrightnesscontrol.cpp
     actions/bundled/dimdisplay.cpp
     actions/bundled/runscript.cpp
     actions/bundled/handlebuttonevents.cpp
@@ -33,6 +34,16 @@ kde4_add_kcfg_files(powerdevilcore_SRCS ../PowerDevilSettings.kcfgc)
 
 set(screensaver_xml "${KDEBASE_WORKSPACE_SOURCE_DIR}/ksmserver/screenlocker/dbus/org.freedesktop.ScreenSaver.xml")
 qt4_add_dbus_interface(powerdevilcore_SRCS ${screensaver_xml} screensaver_interface )
+
+# Action DBus Adaptors
+qt4_add_dbus_adaptor(powerdevilcore_SRCS actions/bundled/org.kde.Solid.PowerManagement.Actions.BrightnessControl.xml
+                     actions/bundled/brightnesscontrol.h PowerDevil::BundledActions::BrightnessControl)
+qt4_add_dbus_adaptor(powerdevilcore_SRCS actions/bundled/org.kde.Solid.PowerManagement.Actions.KeyboardBrightnessControl.xml
+                     actions/bundled/keyboardbrightnesscontrol.h PowerDevil::BundledActions::KeyboardBrightnessControl)
+qt4_add_dbus_adaptor(powerdevilcore_SRCS actions/bundled/org.kde.Solid.PowerManagement.Actions.HandleButtonEvents.xml
+                     actions/bundled/handlebuttonevents.h PowerDevil::BundledActions::HandleButtonEvents)
+qt4_add_dbus_adaptor(powerdevilcore_SRCS actions/bundled/org.kde.Solid.PowerManagement.Actions.SuspendSession.xml
+                     actions/bundled/suspendsession.h PowerDevil::BundledActions::SuspendSession)
 
 kde4_add_library(powerdevilcore SHARED ${powerdevilcore_SRCS} ${powerdevil_bundled_actions_SRCS})
 set_target_properties(powerdevilcore PROPERTIES VERSION ${POWERDEVIL_CORE_VERSION_STRING} SOVERSION ${POWERDEVIL_CORE_VERSION_MAJOR})
@@ -74,6 +85,10 @@ target_link_libraries(kded_powerdevil
     powerdevilcore
 )
 
+if (UDEV_FOUND)
+    target_link_libraries(kded_powerdevil ${UDEV_LIBS})
+endif (UDEV_FOUND)
+
 install(TARGETS kded_powerdevil DESTINATION ${PLUGIN_INSTALL_DIR})
 install(TARGETS powerdevilcore ${INSTALL_TARGETS_DEFAULT_ARGS})
 
@@ -89,6 +104,9 @@ target_link_libraries(powerdevilui
     ${KDE4_KDECORE_LIBS}
     ${QT_QTGUI_LIBRARY}
 )
+
+macro_bool_to_01(UDEV_FOUND HAVE_UDEV)
+configure_file(config-powerdevil.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-powerdevil.h )
 
 install(TARGETS powerdevilui ${INSTALL_TARGETS_DEFAULT_ARGS})
 install(FILES powerdevil.desktop DESTINATION ${SERVICES_INSTALL_DIR}/kded)

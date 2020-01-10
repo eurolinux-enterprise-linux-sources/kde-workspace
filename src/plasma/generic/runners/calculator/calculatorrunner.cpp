@@ -36,7 +36,7 @@ CalculatorRunner::CalculatorRunner( QObject* parent, const QVariantList &args )
     : Plasma::AbstractRunner(parent, args)
 {
     Q_UNUSED(args)
- 
+
     #ifdef ENABLE_QALCULATE
     m_engine = new QalculateEngine;
     setSpeed(SlowSpeed);
@@ -49,6 +49,7 @@ CalculatorRunner::CalculatorRunner( QObject* parent, const QVariantList &args )
 
     QString description = i18n("Calculates the value of :q: when :q: is made up of numbers and "
                                "mathematical symbols such as +, -, /, * and ^.");
+    addSyntax(Plasma::RunnerSyntax(":q:", description));
     addSyntax(Plasma::RunnerSyntax("=:q:", description));
     addSyntax(Plasma::RunnerSyntax(":q:=", description));
 }
@@ -63,11 +64,11 @@ CalculatorRunner::~CalculatorRunner()
 void CalculatorRunner::powSubstitutions(QString& cmd)
 {
     if (cmd.contains("e+", Qt::CaseInsensitive)) {
-        cmd=cmd.replace("e+", "*10^", Qt::CaseInsensitive);
+        cmd = cmd.replace("e+", "*10^", Qt::CaseInsensitive);
     }
 
     if (cmd.contains("e-", Qt::CaseInsensitive)) {
-        cmd=cmd.replace("e-", "*10^-", Qt::CaseInsensitive);
+        cmd = cmd.replace("e-", "*10^-", Qt::CaseInsensitive);
     }
 
     // the below code is scary mainly because we have to honor priority
@@ -204,7 +205,7 @@ void CalculatorRunner::match(Plasma::RunnerContext &context)
     //no meanless space between friendly guys: helps simplify code
     cmd = cmd.trimmed().remove(' ');
 
-    if (cmd.length() < 4) {
+    if (cmd.length() < 3) {
         return;
     }
 
@@ -227,8 +228,20 @@ void CalculatorRunner::match(Plasma::RunnerContext &context)
     } else if (cmd.endsWith('=')) {
         cmd.chop(1);
     } else {
-        // we don't have an actionable equation here
-        return;
+        bool foundDigit = false;
+        for (int i = 0; i < cmd.length(); ++i) {
+            QChar c = cmd.at(i);
+            if (c.isLetter()) {
+                // not just numbers and symbols, so we return
+                return;
+            }
+            if (c.isDigit()) {
+                foundDigit = true;
+            }
+        }
+        if (!foundDigit) {
+            return;
+        }
     }
 
     if (cmd.isEmpty()) {
@@ -241,7 +254,6 @@ void CalculatorRunner::match(Plasma::RunnerContext &context)
     #endif
 
     QString result = calculate(cmd);
-
     if (!result.isEmpty() && result != cmd) {
         if (toHex) {
             result = "0x" + QString::number(result.toInt(), 16).toUpper();

@@ -21,19 +21,33 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #ifndef KWIN_COMPOSITE_H
 #define KWIN_COMPOSITE_H
-
-#include <QtCore/QObject>
-#include <QtCore/QElapsedTimer>
-#include <QtCore/QTimer>
-#include <QtCore/QBasicTimer>
+// KWin
+#include <kwinglobals.h>
+// KDE
+#include <KDE/KSelectionOwner>
+// Qt
+#include <QObject>
+#include <QElapsedTimer>
+#include <QTimer>
+#include <QBasicTimer>
 #include <QRegion>
-
-class KSelectionOwner;
 
 namespace KWin {
 
 class Client;
 class Scene;
+
+class CompositorSelectionOwner : public KSelectionOwner
+{
+    Q_OBJECT
+public:
+    CompositorSelectionOwner(const char *selection);
+private:
+    friend class Compositor;
+    bool owning;
+private slots:
+    void looseOwnership();
+};
 
 class Compositor : public QObject {
     Q_OBJECT
@@ -66,15 +80,14 @@ class Compositor : public QObject {
      **/
     Q_PROPERTY(QString compositingType READ compositingType)
 public:
+    enum SuspendReason { NoReasonSuspend = 0, UserSuspend = 1<<0, BlockRuleSuspend = 1<<1, ScriptSuspend = 1<<2, AllReasonSuspend = 0xff };
+    Q_DECLARE_FLAGS(SuspendReasons, SuspendReason)
     ~Compositor();
     // when adding repaints caused by a window, you probably want to use
     // either Toplevel::addRepaint() or Toplevel::addWorkspaceRepaint()
     void addRepaint(const QRect& r);
     void addRepaint(const QRegion& r);
     void addRepaint(int x, int y, int w, int h);
-    // Mouse polling
-    void startMousePolling();
-    void stopMousePolling();
     /**
      * Whether the Compositor is active. That is a Scene is present and the Compositor is
      * not shutting down itself.
@@ -84,12 +97,7 @@ public:
         return m_xrrRefreshRate;
     }
     void setCompositeResetTimer(int msecs);
-    // returns the _estimated_ delay to the next screen update
-    // good for having a rough idea to calculate transformations, bad to rely on.
-    // might happen few ms earlier, might be an entire frame to short. This is NOT deterministic.
-    int nextFrameDelay() const {
-        return m_nextFrameDelay;
-    }
+
     bool hasScene() const {
         return m_scene != NULL;
     }
@@ -116,32 +124,6 @@ public:
     }
 
     /**
-     * @brief Factory Method to create the Compositor singleton.
-     *
-     * This method is mainly used by Workspace to create the Compositor Singleton as a child
-     * of the Workspace.
-     *
-     * To actually access the Compositor instance use @link self.
-     *
-     * @param parent The parent object
-     * @return :Compositor* Created Compositor if not already created
-     * @warning This method is not Thread safe.
-     * @see self
-     **/
-    static Compositor *createCompositor(QObject *parent);
-    /**
-     * @brief Singleton getter for the Compositor object.
-     *
-     * Ensure that the Compositor has been created through createCompositor prior to access
-     * this method.
-     *
-     * @return :Compositor* The Compositor instance
-     * @see createCompositor
-     **/
-    static Compositor *self() {
-        return s_compositor;
-    }
-    /**
      * @brief Checks whether the Compositor has already been created by the Workspace.
      *
      * This method can be used to check whether self will return the Compositor instance or @c null.
@@ -159,6 +141,10 @@ public:
     static bool compositing() {
         return s_compositor != NULL && s_compositor->isActive();
     }
+
+    // for delayed supportproperty management of effects
+    void keepSupportProperty(xcb_atom_t atom);
+    void removeSupportProperty(xcb_atom_t atom);
 
     // D-Bus: getters for Properties, see documentation on the property
     bool isCompositingPossible() const;
@@ -186,7 +172,8 @@ public Q_SLOTS:
      * @see resume
      * @see isActive
      **/
-    Q_SCRIPTABLE void suspend();
+    Q_SCRIPTABLE inline void suspend() { suspend(ScriptSuspend); }
+    void suspend(Compositor::SuspendReason reason);
     /**
      * @brief Resumes the Compositor if it is currently suspended.
      *
@@ -204,7 +191,8 @@ public Q_SLOTS:
      * @see isCompositingPossible
      * @see isOpenGLBroken
      **/
-    Q_SCRIPTABLE void resume();
+    Q_SCRIPTABLE inline void resume() { resume(ScriptSuspend); }
+    void resume(Compositor::SuspendReason reason);
     /**
      * @brief Tries to suspend or resume the Compositor based on @p active.
      *
@@ -218,6 +206,10 @@ public Q_SLOTS:
      * Note: The starting of the Compositor can require some time and is partially done threaded.
      * After this method returns the setup may not have been completed.
      *
+     * Note: This function only impacts whether compositing is suspended or resumed by scripts
+     * or dbus calls. Compositing may be suspended for user will or a window rule - no matter how
+     * often you call this function!
+     *
      * @param active Whether the Compositor should be resumed (@c true) or suspended (@c false)
      * @return void
      * @see suspend
@@ -226,6 +218,8 @@ public Q_SLOTS:
      * @see isCompositingPossible
      * @see isOpenGLBroken
      **/
+    // NOTICE this is atm. for script usage *ONLY* and needs to be extended like resume / suspend are
+    // if intended to be used from within KWin code!
     Q_SCRIPTABLE void setCompositing(bool active);
     /**
      * Actual slot to perform the toggling compositing.
@@ -271,13 +265,12 @@ private Q_SLOTS:
     void restart();
     void fallbackToXRenderCompositing();
     void performCompositing();
-    void performMousePoll();
     void delayedCheckUnredirect();
     void slotConfigChanged();
     void releaseCompositorSelection();
+    void deleteUnusedSupportProperties();
 
 private:
-    Compositor(QObject *workspace);
     void setCompositeTimer();
     bool windowRepaintsPending() const;
 
@@ -289,20 +282,18 @@ private:
     void restartKWin(const QString &reason);
 
     /**
-     * Whether the Compositor is currently suspended.
+     * Whether the Compositor is currently suspended, 8 bits encoding the reason
      **/
-    bool m_suspended;
-    /**
-     * Whether the Compositor is currently blocked by at least one Client requesting full resources.
-     **/
-    bool m_blocked;
+    SuspendReasons m_suspended;
+
     QBasicTimer compositeTimer;
-    KSelectionOwner* cm_selection;
+    CompositorSelectionOwner* cm_selection;
     QTimer m_releaseSelectionTimer;
-    uint vBlankInterval, fpsInterval;
+    QList<xcb_atom_t> m_unusedSupportProperties;
+    QTimer m_unusedSupportPropertyTimer;
+    qint64 vBlankInterval, fpsInterval;
     int m_xrrRefreshRate;
     QElapsedTimer nextPaintReference;
-    QTimer mousePollingTimer;
     QRegion repaints_region;
 
     QTimer unredirectTimer;
@@ -310,10 +301,10 @@ private:
     QTimer compositeResetTimer; // for compressing composite resets
     bool m_finishing; // finish() sets this variable while shutting down
     bool m_starting; // start() sets this variable while starting
-    int m_timeSinceLastVBlank, m_nextFrameDelay;
+    qint64 m_timeSinceLastVBlank;
     Scene *m_scene;
 
-    static Compositor *s_compositor;
+    KWIN_SINGLETON_VARIABLE(Compositor, s_compositor)
 };
 }
 

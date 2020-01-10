@@ -4,7 +4,7 @@
     Copyright (c) 2001
         Karol Szwed <gallium@kde.org>
         http://gallium.n3.net/
-    Copyright 2009, 2010 Martin Gräßlin <kde@martin-graesslin.com>
+    Copyright 2009, 2010 Martin Gräßlin <mgraesslin@kde.org>
 
     Supports new kwin configuration plugins, and titlebar button position
     modification via dnd interface.
@@ -40,14 +40,14 @@
 #include <QtDeclarative/QDeclarativeEngine>
 #include <QtDeclarative/QDeclarativeItem>
 #include <QtDeclarative/QDeclarativeView>
-#include <QtGui/QSortFilterProxyModel>
-#include <QtGui/QGraphicsObject>
-#include <QtGui/QScrollBar>
+#include <QSortFilterProxyModel>
+#include <QGraphicsObject>
+#include <QScrollBar>
 #include <QUiLoader>
 // KDE
 #include <KAboutData>
 #include <KDialog>
-#include <KLocale>
+#include <KDE/KLocalizedString>
 #include <KMessageBox>
 #include <KNS3/DownloadDialog>
 #include <KDE/KStandardDirs>
@@ -170,7 +170,7 @@ void KWinDecorationModule::init()
     m_ui->decorationList->verticalScrollBar()->disconnect(m_ui->decorationList);
     connect(m_ui->decorationList->rootObject(), SIGNAL(contentYChanged()), SLOT(updateScrollbarValue()));
     connect(m_ui->decorationList->rootObject(), SIGNAL(contentHeightChanged()), SLOT(updateScrollbarRange()));
-    connect(m_ui->decorationList->verticalScrollBar(), SIGNAL(rangeChanged(int, int )), SLOT(updateScrollbarRange()));
+    connect(m_ui->decorationList->verticalScrollBar(), SIGNAL(rangeChanged(int,int)), SLOT(updateScrollbarRange()));
     connect(m_ui->decorationList->verticalScrollBar(), SIGNAL(valueChanged(int)), SLOT(updateViewPosition(int)));
 
     m_ui->decorationList->installEventFilter(this);
@@ -388,6 +388,7 @@ void KWinDecorationModule::slotConfigureDecoration()
         dlg->setCaption(i18n("Decoration Options"));
         dlg->setButtons(KDialog::Ok | KDialog::Cancel);
         KWinAuroraeConfigForm *form = new KWinAuroraeConfigForm(dlg);
+        form->enableNoSideBorderSupport(index.data(DecorationModel::TypeRole).toInt() == DecorationModelData::QmlDecoration);
         dlg->setMainWidget(form);
         form->borderSizesCombo->setCurrentIndex(index.data(DecorationModel::BorderSizeRole).toInt());
         form->buttonSizesCombo->setCurrentIndex(index.data(DecorationModel::ButtonSizeRole).toInt());
@@ -443,9 +444,7 @@ void KWinDecorationModule::slotConfigureDecoration()
         delete configDialog;
     }
     if (reload) {
-        // Send signal to all kwin instances
-        QDBusMessage message = QDBusMessage::createSignal("/KWin", "org.kde.KWin", "reloadConfig");
-        QDBusConnection::sessionBus().send(message);
+        save();
     }
 }
 

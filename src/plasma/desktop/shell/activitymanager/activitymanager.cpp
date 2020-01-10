@@ -26,6 +26,7 @@
 #include <QDeclarativeEngine>
 #include <QDeclarativeComponent>
 
+#include <KAuthorized>
 #include <KStandardDirs>
 #include <KServiceTypeTrader>
 #include <knewstuff3/downloaddialog.h>
@@ -33,6 +34,7 @@
 #include <KWindowSystem>
 
 #include <plasma/containment.h>
+#include <plasma/corona.h>
 #include <plasma/package.h>
 #include <plasma/widgets/declarativewidget.h>
 
@@ -99,7 +101,7 @@ void ActivityManagerPrivate::init(Plasma::Location loc)
     structure->setPath(path);
 
     package = new Plasma::Package(path, pluginName, structure);
-    KGlobal::locale()->insertCatalog("plasma_package_org.kde.desktop.activitymanager");
+    KGlobal::locale()->insertCatalog("plasma_package_" + pluginName);
 
     declarativeWidget = new Plasma::DeclarativeWidget(q);
     declarativeWidget->setInitializationDelayed(true);
@@ -307,6 +309,16 @@ QString ActivityManager::chooseIcon() const
     QString icon = dialog->openDialog();
     dialog->deleteLater();
     return icon;
+}
+
+bool ActivityManager::canAddActivities() const
+{
+    return KAuthorized::authorize("plasma-desktop/add_activities");
+}
+
+bool ActivityManager::canAddWidgets() const
+{
+    return d->containment && d->containment->corona()->immutability() == Plasma::Mutable;
 }
 
 #include "activitymanager.moc"

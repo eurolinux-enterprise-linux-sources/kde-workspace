@@ -2,7 +2,7 @@
  KWin - the KDE window manager
  This file is part of the KDE project.
 
- Copyright (C) 2008 Martin Gräßlin <ubuntu@martin-graesslin.com>
+ Copyright (C) 2008 Martin Gräßlin <mgraesslin@kde.org>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -66,7 +66,7 @@ public:
     virtual void paintWindow(EffectWindow* w, int mask, QRegion region, WindowPaintData& data);
     virtual bool borderActivated(ElectricBorder border);
     virtual void grabbedKeyboardEvent(QKeyEvent* e);
-    virtual void windowInputMouseEvent(Window w, QEvent* e);
+    virtual void windowInputMouseEvent(QEvent* e);
     virtual bool isActive() const;
 
     // proxy functions
@@ -137,10 +137,9 @@ private slots:
     void slotTabBoxAdded(int mode);
     void slotTabBoxUpdated();
     void slotTabBoxClosed();
-    void slotMouseChanged(const QPoint& pos, const QPoint& oldpos, Qt::MouseButtons buttons,
-                              Qt::MouseButtons oldbuttons, Qt::KeyboardModifiers modifiers, Qt::KeyboardModifiers oldmodifiers);
     void slotCubeCapLoaded();
     void slotWallPaperLoaded();
+    void slotResetShaders();
 private:
     enum RotationDirection {
         Left,
@@ -171,7 +170,6 @@ private:
     QImage loadCubeCap(const QString &capPath);
     QImage loadWallPaper(const QString &file);
     bool activated;
-    bool mousePolling;
     bool cube_painting;
     bool keyboard_grab;
     bool schedule_close;
@@ -179,7 +177,6 @@ private:
     QList<ElectricBorder> borderActivateCylinder;
     QList<ElectricBorder> borderActivateSphere;
     int painting_desktop;
-    Window input;
     int frontDesktop;
     float cubeOpacity;
     bool opacityDesktopOnly;
@@ -233,6 +230,8 @@ private:
     // needed for reflection
     float mAddedHeightCoeff1;
     float mAddedHeightCoeff2;
+
+    QString m_shadersDir;
 
     QMatrix4x4 m_rotationMatrix;
     QMatrix4x4 m_reflectionMatrix;

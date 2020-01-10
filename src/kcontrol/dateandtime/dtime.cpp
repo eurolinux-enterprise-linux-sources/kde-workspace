@@ -98,7 +98,7 @@ Dtime::Dtime(QWidget * parent)
 
   timeEdit = new QTimeEdit( timeBox );
   timeEdit->setWrapping(true);
-  timeEdit->setDisplayFormat("HH:mm:ss");
+  timeEdit->setDisplayFormat(KGlobal::locale()->use12Clock() ? "hh:mm:ss ap" : "HH:mm:ss");
   v3->addWidget(timeEdit);
 
   v3->addStretch();
@@ -122,9 +122,17 @@ Dtime::Dtime(QWidget * parent)
 
 void Dtime::currentZone()
 {
-    m_local->setText(i18n("Current local time zone: %1 (%2)",
-                          KTimeZoneWidget::displayName(KSystemTimeZones::local()),
-                          QString::fromUtf8(KSystemTimeZones::local().abbreviations().first())));
+    KTimeZone localZone = KSystemTimeZones::local();
+
+    if (localZone.abbreviations().isEmpty()) {
+        m_local->setText(i18nc("%1 is name of time zone", "Current local time zone: %1",
+                              KTimeZoneWidget::displayName(localZone)));
+    } else {
+        m_local->setText(i18nc("%1 is name of time zone, %2 is its abbreviation",
+                               "Current local time zone: %1 (%2)",
+                              KTimeZoneWidget::displayName(localZone),
+                              QString::fromUtf8(localZone.abbreviations().first())));
+    }
 }
 
 void Dtime::serverTimeCheck() {
@@ -134,27 +142,15 @@ void Dtime::serverTimeCheck() {
   //kclock->setEnabled(enabled);
 }
 
-void Dtime::findNTPutility(){
-  QByteArray envpath = qgetenv("PATH");
-  if (!envpath.isEmpty() && envpath[0] == ':') {
-    envpath = envpath.mid(1);
-  }
-
-  QString path = "/sbin:/usr/sbin:";
-  if (!envpath.isEmpty()) {
-    path += QString::fromLocal8Bit(envpath);
-  } else {
-    path += QLatin1String("/bin:/usr/bin");
-  }
-
-  foreach(const QString &possible_ntputility, QStringList() << "ntpdate" << "rdate" ) {
-    if( !((ntpUtility = KStandardDirs::findExe(possible_ntputility, path)).isEmpty()) ) {
-      kDebug() << "ntpUtility = " << ntpUtility;
-      return;
+void Dtime::findNTPutility()
+{
+    const QString exePath = QLatin1String("/usr/sbin:/usr/bin:/sbin:/bin");
+    foreach(const QString &possible_ntputility, QStringList() << "ntpdate" << "rdate" ) {
+        ntpUtility = KStandardDirs::findExe(possible_ntputility, exePath);
+        if (!ntpUtility.isEmpty()) {
+            return;
+        }
     }
-  }
-
-  kDebug() << "ntpUtility not found!";
 }
 
 void Dtime::set_time()
@@ -230,7 +226,6 @@ void Dtime::save( QVariantMap& helperargs )
   helperargs["ntp"] = true;
   helperargs["ntpServers"] = list;
   helperargs["ntpEnabled"] = setDateTimeAuto->isChecked();
-  helperargs["ntpUtility"] = ntpUtility;
 
   if(setDateTimeAuto->isChecked() && !ntpUtility.isEmpty()){
     // NTP Time setting - done in helper

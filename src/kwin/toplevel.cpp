@@ -22,38 +22,47 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <kxerrorhandler.h>
 
+#ifdef KWIN_BUILD_ACTIVITIES
+#include "activities.h"
+#endif
 #include "atoms.h"
 #include "client.h"
+#include "client_machine.h"
 #include "effects.h"
+#include "screens.h"
 #include "shadow.h"
+#include "xcbutils.h"
 
 namespace KWin
 {
 
-Toplevel::Toplevel(Workspace* ws)
+Toplevel::Toplevel()
     : vis(NULL)
     , info(NULL)
     , ready_for_painting(true)
     , m_isDamaged(false)
     , client(None)
     , frame(None)
-    , wspace(ws)
-    , window_pix(None)
     , damage_handle(None)
     , is_shape(false)
     , effect_window(NULL)
+    , m_clientMachine(new ClientMachine(this))
     , wmClientLeaderWin(0)
     , unredirect(false)
     , unredirectSuspend(false)
     , m_damageReplyPending(false)
+    , m_screen(0)
+    , m_skipCloseAnimation(false)
 {
     connect(this, SIGNAL(damaged(KWin::Toplevel*,QRect)), SIGNAL(needsRepaint()));
+    connect(screens(), SIGNAL(changed()), SLOT(checkScreen()));
+    connect(screens(), SIGNAL(countChanged(int,int)), SLOT(checkScreen()));
+    setupCheckScreenConnection();
 }
 
 Toplevel::~Toplevel()
 {
     assert(damage_handle == None);
-    discardWindowPixmap();
     delete info;
 }
 
@@ -81,22 +90,6 @@ QDebug& operator<<(QDebug& stream, const ToplevelList& list)
     return stream;
 }
 
-QDebug& operator<<(QDebug& stream, const ConstToplevelList& list)
-{
-    stream << "LIST:(";
-    bool first = true;
-    for (ConstToplevelList::ConstIterator it = list.begin();
-            it != list.end();
-            ++it) {
-        if (!first)
-            stream << ":";
-        first = false;
-        stream << *it;
-    }
-    stream << ")";
-    return stream;
-}
-
 QRect Toplevel::decorationRect() const
 {
     return rect();
@@ -105,7 +98,7 @@ QRect Toplevel::decorationRect() const
 void Toplevel::detectShape(Window id)
 {
     const bool wasShape = is_shape;
-    is_shape = Extensions::hasShape(id);
+    is_shape = Xcb::Extensions::self()->hasShape(id);
     if (wasShape != is_shape) {
         emit shapedChanged();
     }
@@ -120,8 +113,6 @@ void Toplevel::copyToDeleted(Toplevel* c)
     info = c->info;
     client = c->client;
     frame = c->frame;
-    wspace = c->wspace;
-    window_pix = c->window_pix;
     ready_for_painting = c->ready_for_painting;
     damage_handle = None;
     damage_region = c->damage_region;
@@ -132,13 +123,13 @@ void Toplevel::copyToDeleted(Toplevel* c)
         effect_window->setWindow(this);
     resource_name = c->resourceName();
     resource_class = c->resourceClass();
-    client_machine = c->wmClientMachine(false);
+    m_clientMachine = c->m_clientMachine;
+    m_clientMachine->setParent(this);
     wmClientLeaderWin = c->wmClientLeader();
     window_role = c->windowRole();
     opaque_region = c->opaqueRegion();
-    // this needs to be done already here, otherwise 'c' could very likely
-    // call discardWindowPixmap() in something called during cleanup
-    c->window_pix = None;
+    m_screen = c->m_screen;
+    m_skipCloseAnimation = c->m_skipCloseAnimation;
 }
 
 // before being deleted, remove references to everything that's now
@@ -233,11 +224,7 @@ QByteArray Toplevel::wmCommand()
 
 void Toplevel::getWmClientMachine()
 {
-    client_machine = getStringProperty(window(), XA_WM_CLIENT_MACHINE);
-    if (client_machine.isEmpty() && wmClientLeaderWin && wmClientLeaderWin != window())
-        client_machine = getStringProperty(wmClientLeaderWin, XA_WM_CLIENT_MACHINE);
-    if (client_machine.isEmpty())
-        client_machine = "localhost";
+    m_clientMachine->resolve(window(), wmClientLeader());
 }
 
 /*!
@@ -246,13 +233,15 @@ void Toplevel::getWmClientMachine()
 */
 QByteArray Toplevel::wmClientMachine(bool use_localhost) const
 {
-    QByteArray result = client_machine;
-    if (use_localhost) {
-        // special name for the local machine (localhost)
-        if (result != "localhost" && isLocalMachine(result))
-            result = "localhost";
+    if (!m_clientMachine) {
+        // this should never happen
+        return QByteArray();
     }
-    return result;
+    if (use_localhost && m_clientMachine->isLocal()) {
+        // special name for the local machine (localhost)
+        return ClientMachine::localhost();
+    }
+    return m_clientMachine->hostName();
 }
 
 /*!
@@ -322,19 +311,48 @@ void Toplevel::deleteEffectWindow()
     effect_window = NULL;
 }
 
+void Toplevel::checkScreen()
+{
+    if (screens()->count() == 1) {
+        if (m_screen != 0) {
+            m_screen = 0;
+            emit screenChanged();
+        }
+        return;
+    }
+    const int s = screens()->number(geometry().center());
+    if (s != m_screen) {
+        m_screen = s;
+        emit screenChanged();
+    }
+}
+
+void Toplevel::setupCheckScreenConnection()
+{
+    connect(this, SIGNAL(geometryShapeChanged(KWin::Toplevel*,QRect)), SLOT(checkScreen()));
+    connect(this, SIGNAL(geometryChanged()), SLOT(checkScreen()));
+    checkScreen();
+}
+
+void Toplevel::removeCheckScreenConnection()
+{
+    disconnect(this, SIGNAL(geometryShapeChanged(KWin::Toplevel*,QRect)), this, SLOT(checkScreen()));
+    disconnect(this, SIGNAL(geometryChanged()), this, SLOT(checkScreen()));
+}
+
 int Toplevel::screen() const
 {
-    int s = workspace()->screenNumber(geometry().center());
-    if (s < 0) {
-        kDebug(1212) << "Invalid screen: Center" << geometry().center() << ", screen" << s;
-        return 0;
-    }
-    return s;
+    return m_screen;
 }
 
 bool Toplevel::isOnScreen(int screen) const
 {
-    return workspace()->screenGeometry(screen).intersects(geometry());
+    return screens()->geometry(screen).intersects(geometry());
+}
+
+bool Toplevel::isOnActiveScreen() const
+{
+    return isOnScreen(screens()->current());
 }
 
 void Toplevel::getShadow()
@@ -429,6 +447,57 @@ bool Toplevel::isClient() const
 bool Toplevel::isDeleted() const
 {
     return false;
+}
+
+bool Toplevel::isOnCurrentActivity() const
+{
+#ifdef KWIN_BUILD_ACTIVITIES
+    return isOnActivity(Activities::self()->current());
+#else
+    return true;
+#endif
+}
+
+void Toplevel::elevate(bool elevate)
+{
+    if (!effectWindow()) {
+        return;
+    }
+    effectWindow()->elevate(elevate);
+    addWorkspaceRepaint(visibleRect());
+}
+
+pid_t Toplevel::pid() const
+{
+    return info->pid();
+}
+
+void Toplevel::getSkipCloseAnimation()
+{
+    xcb_get_property_cookie_t cookie = xcb_get_property_unchecked(connection(), false, window(), atoms->kde_skip_close_animation, XCB_ATOM_CARDINAL, 0, 1);
+    ScopedCPointer<xcb_get_property_reply_t> reply(xcb_get_property_reply(connection(), cookie, NULL));
+    bool newValue = false;
+    if (!reply.isNull()) {
+        if (reply->format == 32 && reply->type == XCB_ATOM_CARDINAL && reply->value_len == 1) {
+            const uint32_t value = *reinterpret_cast<uint32_t*>(xcb_get_property_value(reply.data()));
+            newValue = (value != 0);
+        }
+    }
+    setSkipCloseAnimation(newValue);
+}
+
+bool Toplevel::skipsCloseAnimation() const
+{
+    return m_skipCloseAnimation;
+}
+
+void Toplevel::setSkipCloseAnimation(bool set)
+{
+    if (set == m_skipCloseAnimation) {
+        return;
+    }
+    m_skipCloseAnimation = set;
+    emit skipCloseAnimationChanged();
 }
 
 } // namespace

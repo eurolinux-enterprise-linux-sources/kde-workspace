@@ -67,6 +67,14 @@ Containment::~Containment()
             cg = KConfigGroup(&cg, containment->wallpaper()->pluginName());
             containment->wallpaper()->restore(cg);
         }
+
+        // we need to make this connection ourselves in case it hasn't been received
+        // by the containment yet; currently in libplasma it only connects to this signal
+        // when the wallpaper has not yet been iniialized
+        // since this code alters the expected order of initialization, we do a bit of
+        // bookkeeping here
+        connect(containment->wallpaper(), SIGNAL(update(QRectF)), containment, SLOT(updateRect(QRectF)),
+                Qt::UniqueConnection);
     }
 
     reloadConfigIfNeeded();
@@ -144,6 +152,9 @@ QString Containment::formFactor() const
             break;
         case Plasma::Vertical:
             return "vertical";
+            break;
+        case Plasma::Application:
+            return "application";
             break;
     }
 

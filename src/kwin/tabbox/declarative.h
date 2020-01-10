@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // includes
 #include <QtDeclarative/QDeclarativeImageProvider>
 #include <QtDeclarative/QDeclarativeView>
+#include <KDE/KService>
 #include "tabboxconfig.h"
 
 // forward declaration
@@ -42,7 +43,7 @@ namespace TabBox
 class ImageProvider : public QDeclarativeImageProvider
 {
 public:
-    ImageProvider(QAbstractItemModel *model);
+    explicit ImageProvider(QAbstractItemModel *model);
     virtual QPixmap requestPixmap(const QString &id, QSize *size, const QSize &requestedSize);
 
 private:
@@ -71,6 +72,10 @@ private Q_SLOTS:
     void currentIndexChanged(int row);
     void slotWindowChanged(WId wId, unsigned int properties);
 private:
+    KService::Ptr findWindowSwitcher();
+    KService::Ptr findDesktopSwitcher();
+    QString findWindowSwitcherScriptFile(KService::Ptr service);
+    QString findDesktopSwitcherScriptFile(KService::Ptr service);
     QAbstractItemModel *m_model;
     TabBoxConfig::TabBoxMode m_mode;
     QRect m_currentScreenGeometry;

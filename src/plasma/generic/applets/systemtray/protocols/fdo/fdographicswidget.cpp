@@ -60,10 +60,23 @@ FdoGraphicsWidget::FdoGraphicsWidget(WId winId, QGraphicsWidget *parent)
     d->winId = winId;
 
     setMinimumSize(22, 22);
-    setMaximumSize(22, 22);
+    setMaximumSize(48, 48);
     resize(22, 22);
 
     setCacheMode(QGraphicsItem::NoCache);
+
+    QGraphicsView *parentView = 0;
+
+    foreach (QGraphicsView *view, scene()->views()) {
+        if (view->isVisible() && view->sceneRect().intersects(sceneBoundingRect())) {
+            parentView = view;
+            break;
+        }
+    }
+
+    if (parentView) {     
+        parentView->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);      
+    }
 
     connect(Plasma::Theme::defaultTheme(), SIGNAL(themeChanged()),
             this, SLOT(updateWidgetBackground()));
@@ -149,8 +162,9 @@ void FdoGraphicsWidget::setupXEmbedDelegate()
 
     X11EmbedDelegate *widget = new X11EmbedDelegate();
     widget->setMinimumSize(22, 22);
-    widget->setMaximumSize(22, 22);
-    widget->resize(22, 22);
+    widget->setMaximumSize(48, 48);
+    widget->resize(size().toSize());
+    widget->move(QPoint(size().width()/2, size().height()/2) - QPoint(11, 11));
 
     connect(widget->container(), SIGNAL(clientIsEmbedded()),
             this, SLOT(handleClientEmbedded()));
@@ -198,6 +212,14 @@ void FdoGraphicsWidget::handleClientError(QX11EmbedContainer::Error error)
 
     //kDebug() << "client error (" << d->winId << ")";
     emit clientClosed();
+}
+
+void FdoGraphicsWidget::resizeEvent(QGraphicsSceneResizeEvent *event)
+{
+    if (d->widget) {
+        d->widget.data()->resize(size().toSize());
+    }
+    
 }
 
 }

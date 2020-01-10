@@ -6,7 +6,7 @@
 // animation configuration item
 // -------------------
 //
-// Copyright (c) 2010 Hugo Pereira Da Costa <hugo@oxygen-icons.org>
+// Copyright (c) 2010 Hugo Pereira Da Costa <hugo.pereira@free.fr>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
@@ -27,8 +27,8 @@
 // IN THE SOFTWARE.
 //////////////////////////////////////////////////////////////////////////////
 
+#include "../oxygendecorationdefines.h"
 #include "oxygenbaseanimationconfigwidget.h"
-#include "../oxygenconfiguration.h"
 
 namespace Oxygen
 {
@@ -48,15 +48,12 @@ namespace Oxygen
         explicit AnimationConfigWidget( QWidget* = 0 );
 
         //! destructor
-        virtual ~AnimationConfigWidget( void );
+        virtual ~AnimationConfigWidget( void )
+        {}
 
         //! configuration
-        void setConfiguration( const Configuration& configuration )
+        void setConfiguration( ConfigurationPtr configuration )
         { _configuration = configuration; }
-
-        //! configuration
-        const Configuration& configuration( void )  const
-        { return _configuration; }
 
         public slots:
 
@@ -74,7 +71,7 @@ namespace Oxygen
         private:
 
         //! local configuration, needed to handle I/O
-        Configuration _configuration;
+        ConfigurationPtr _configuration;
 
         //!@name animations
         //@{

@@ -109,6 +109,7 @@ ControllerWindow::~ControllerWindow()
 
 void ControllerWindow::showEvent(QShowEvent * event)
 {
+    Q_UNUSED(event)
     m_panelShadow->addWindow(this);
 }
 
@@ -239,8 +240,6 @@ void ControllerWindow::syncToGraphicsWidget()
 {
     m_adjustViewTimer->stop();
     if (m_view && m_graphicsWidget) {
-        QSize prevSize = size();
-
         //set the sizehints correctly:
         int left, top, right, bottom;
         getContentsMargins(&left, &top, &right, &bottom);
@@ -448,6 +447,7 @@ void ControllerWindow::showActivityManager()
         m_activityManager->show();
         setGraphicsWidget(m_activityManager);
     }
+    m_activityManager->setContainment(containment());
     m_view->setFocus();
     m_activityManager->setFlag(QGraphicsItem::ItemIsFocusable);
     m_activityManager->setFocus();

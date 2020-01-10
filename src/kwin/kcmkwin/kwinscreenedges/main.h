@@ -56,7 +56,8 @@ public slots:
     virtual void defaults();
 protected:
     virtual void showEvent(QShowEvent* e);
-
+private slots:
+    void sanitizeCooldown();
 private:
     KWinScreenEdgesConfigForm* m_ui;
     KSharedConfigPtr m_config;
@@ -69,8 +70,8 @@ private:
         Cube,
         Cylinder,
         Sphere,
-        FlipSwitchAll,
-        FlipSwitchCurrent
+        TabBox,
+        TabBoxAlternative
     };
 
     bool effectEnabled(const QString& effect, const KConfigGroup& cfg) const;

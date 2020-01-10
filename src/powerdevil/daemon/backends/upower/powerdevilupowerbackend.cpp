@@ -29,30 +29,53 @@
 #include <KPluginFactory>
 #include <KAuth/Action>
 
+#include "xrandrx11helper.h"
 #include "xrandrbrightness.h"
 #include "upowersuspendjob.h"
 #include "login1suspendjob.h"
+#include "upstart_interface.h"
+#include "udevqt.h"
 
 #define HELPER_ID "org.kde.powerdevil.backlighthelper"
 
 bool checkSystemdVersion(uint requiredVersion)
 {
-    bool ok;
 
     QDBusInterface systemdIface("org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager",
                                 QDBusConnection::systemBus(), 0);
-    uint version = systemdIface.property("Version").toString().section(' ', 1).toUInt(&ok);
-    if (ok) {
-       return (version >= requiredVersion);
-    } else {
-       kDebug() << "Unknown version string from Systemd";
-       return false;
+
+    const QString reply = systemdIface.property("Version").toString();
+
+    QRegExp expsd("(systemd )?([0-9]+)");
+
+    if (expsd.exactMatch(reply)) {
+        const uint version = expsd.cap(2).toUInt();
+        return (version >= requiredVersion);
     }
+
+    // Since version 1.11 Upstart user sessions implement the exact same API as logind
+    // and are going to the maintain the API in future releases.
+    // Hence, powerdevil can support this init system as well
+    // This has no effect on systemd integration since the check is done after systemd
+    ComUbuntuUpstart0_6Interface upstartInterface(QLatin1String("com.ubuntu.Upstart"),
+                                                  QLatin1String("/com/ubuntu/Upstart"),
+                                                  QDBusConnection::sessionBus());
+
+    QRegExp exp("(?:init \\()?upstart ([0-9.]+)(?:\\))?");
+    if(exp.exactMatch(upstartInterface.version())) {
+        // Only keep the X.Y part of a X.Y.Z version
+        QStringList items = exp.cap(1).split('.').mid(0, 2);
+        const float upstartVersion = items.join(QString('.')).toFloat();
+        return upstartVersion >= 1.1;
+    }
+
+    kDebug() << "No appropriate systemd version or upstart version found";
+    return false;
 }
 
 PowerDevilUPowerBackend::PowerDevilUPowerBackend(QObject* parent)
     : BackendInterface(parent),
-      m_brightnessControl(0),
+      m_brightnessControl(0), m_kbdMaxBrightness(0),
       m_lidIsPresent(false), m_lidIsClosed(false), m_onBattery(false)
 {
 
@@ -80,6 +103,31 @@ bool PowerDevilUPowerBackend::isAvailable()
             if (reply.value().contains(UPOWER_SERVICE)) {
                 kDebug() << "UPower was found, activating service...";
                 QDBusConnection::systemBus().interface()->startService(UPOWER_SERVICE);
+                if (!QDBusConnection::systemBus().interface()->isServiceRegistered(UPOWER_SERVICE)) {
+                    // Wait for it
+                    QEventLoop e;
+                    QTimer *timer = new QTimer;
+                    timer->setInterval(10000);
+                    timer->setSingleShot(true);
+
+                    connect(QDBusConnection::systemBus().interface(), SIGNAL(serviceRegistered(QString)),
+                            &e, SLOT(quit()));
+                    connect(timer, SIGNAL(timeout()), &e, SLOT(quit()));
+
+                    timer->start();
+
+                    while (!QDBusConnection::systemBus().interface()->isServiceRegistered(UPOWER_SERVICE)) {
+                        e.exec();
+
+                        if (!timer->isActive()) {
+                            kDebug() << "Activation of UPower timed out. There is likely a problem with your configuration.";
+                            timer->deleteLater();
+                            return false;
+                        }
+                    }
+
+                    timer->deleteLater();
+                }
                 return true;
             } else {
                 kDebug() << "UPower cannot be found on this system.";
@@ -110,30 +158,75 @@ void PowerDevilUPowerBackend::init()
     if (QDBusConnection::systemBus().interface()->isServiceRegistered(LOGIN1_SERVICE)) {
         m_login1Interface = new QDBusInterface(LOGIN1_SERVICE, "/org/freedesktop/login1", "org.freedesktop.login1.Manager", QDBusConnection::systemBus(), this);
     }
+
+    bool screenBrightnessAvailable = false;
     m_upowerInterface = new OrgFreedesktopUPowerInterface(UPOWER_SERVICE, "/org/freedesktop/UPower", QDBusConnection::systemBus(), this);
-    m_kbdBacklight = new OrgFreedesktopUPowerKbdBacklightInterface(UPOWER_SERVICE, "/org/freedesktop/UPower/KbdBacklight", QDBusConnection::systemBus(), this);
     m_brightnessControl = new XRandrBrightness();
+    if (!m_brightnessControl->isSupported()) {
+        kDebug() << "Using helper";
+        KAuth::Action action("org.kde.powerdevil.backlighthelper.syspath");
+        action.setHelperID(HELPER_ID);
+        KAuth::ActionReply reply = action.execute();
+        if (reply.succeeded()) {
+            m_syspath = reply.data()["syspath"].toString();
+            m_syspath = QFileInfo(m_syspath).readLink();
+
+            UdevQt::Client *client =  new UdevQt::Client(QStringList("backlight"), this);
+            connect(client, SIGNAL(deviceChanged(UdevQt::Device)), SLOT(onDeviceChanged(UdevQt::Device)));
+            screenBrightnessAvailable = true;
+        }
+    } else {
+        kDebug() << "Using XRandR";
+        m_randrHelper = new XRandRX11Helper();
+        connect(m_randrHelper, SIGNAL(brightnessChanged()), this, SLOT(slotScreenBrightnessChanged()));
+        screenBrightnessAvailable = true;
+    }
 
     // Capabilities
     setCapabilities(SignalResumeFromSuspend);
 
     // devices
     enumerateDevices();
+
     connect(m_upowerInterface, SIGNAL(Changed()), this, SLOT(slotPropertyChanged()));
+    // for UPower >= 0.99.0, missing Changed() signal
+    QDBusConnection::systemBus().connect(UPOWER_SERVICE, UPOWER_PATH, "org.freedesktop.DBus.Properties", "PropertiesChanged", this,
+                                         SLOT(onPropertiesChanged(QString,QVariantMap,QStringList)));
+
     connect(m_upowerInterface, SIGNAL(DeviceAdded(QString)), this, SLOT(slotDeviceAdded(QString)));
     connect(m_upowerInterface, SIGNAL(DeviceRemoved(QString)), this, SLOT(slotDeviceRemoved(QString)));
+    // for UPower >= 0.99.0, changed signature :o/
+    QDBusConnection::systemBus().connect(UPOWER_SERVICE, UPOWER_PATH, UPOWER_IFACE, "DeviceAdded",
+                                         this, SLOT(slotDeviceAdded(QDBusObjectPath)));
+    QDBusConnection::systemBus().connect(UPOWER_SERVICE, UPOWER_PATH, UPOWER_IFACE, "DeviceRemoved",
+                                         this, SLOT(slotDeviceRemoved(QDBusObjectPath)));
+
     connect(m_upowerInterface, SIGNAL(DeviceChanged(QString)), this, SLOT(slotDeviceChanged(QString)));
+    // for UPower >= 0.99.0, see slotDeviceAdded(const QString & device)
 
     // Brightness Controls available
     BrightnessControlsList controls;
-    controls.insert(QLatin1String("LVDS1"), Screen);
+    if (screenBrightnessAvailable) {
+        controls.insert(QLatin1String("LVDS1"), Screen);
+        m_cachedBrightnessMap.insert(Screen, brightness(Screen));
+        kDebug() << "current screen brightness: " << m_cachedBrightnessMap.value(Screen);
+    }
 
-    if (m_kbdBacklight->isValid())
-        controls.insert(QLatin1String("KBD"), Keyboard);
-
-    if (!controls.isEmpty()) {
-        m_cachedBrightness = brightness(Screen);
-        kDebug() << "current screen brightness: " << m_cachedBrightness;
+    m_kbdBacklight = new OrgFreedesktopUPowerKbdBacklightInterface(UPOWER_SERVICE, "/org/freedesktop/UPower/KbdBacklight", QDBusConnection::systemBus(), this);
+    if (m_kbdBacklight->isValid()) {
+        // Cache max value
+        QDBusPendingReply<int> rep = m_kbdBacklight->GetMaxBrightness();
+        rep.waitForFinished();
+        if (rep.isValid()) {
+            m_kbdMaxBrightness = rep.value();
+        }
+        // TODO Do a proper check if the kbd backlight dbus object exists. But that should work for now ..
+        if (m_kbdMaxBrightness) {
+            controls.insert(QLatin1String("KBD"), Keyboard);
+            m_cachedBrightnessMap.insert(Keyboard, brightness(Keyboard));
+            kDebug() << "current keyboard backlight brightness: " << m_cachedBrightnessMap.value(Keyboard);
+            connect(m_kbdBacklight, SIGNAL(BrightnessChanged(int)), this, SLOT(onKeyboardBrightnessChanged(int)));
+        }
     }
 
     // Supported suspend methods
@@ -196,28 +289,64 @@ void PowerDevilUPowerBackend::init()
     setBackendIsReady(controls, supported);
 }
 
-void PowerDevilUPowerBackend::brightnessKeyPressed(PowerDevil::BackendInterface::BrightnessKeyType type)
+void PowerDevilUPowerBackend::onDeviceChanged(const UdevQt::Device &device)
 {
-    BrightnessControlsList controls = brightnessControlsAvailable();
-    QList<QString> screenControls = controls.keys(Screen);
+    kDebug() << "Udev device changed" << m_syspath << device.sysfsPath();
+    if (device.sysfsPath() != m_syspath) {
+        return;
+    }
 
-    if (screenControls.isEmpty()) {
+    int maxBrightness = device.sysfsProperty("max_brightness").toInt();
+    if (maxBrightness <= 0) {
+        return;
+    }
+    float newBrightness = device.sysfsProperty("brightness").toInt() * 100 / maxBrightness;
+
+    if (!qFuzzyCompare(newBrightness, m_cachedBrightnessMap[Screen])) {
+        m_cachedBrightnessMap[Screen] = newBrightness;
+        onBrightnessChanged(Screen, m_cachedBrightnessMap[Screen]);
+    }
+}
+
+void PowerDevilUPowerBackend::brightnessKeyPressed(PowerDevil::BackendInterface::BrightnessKeyType type, BrightnessControlType controlType)
+{
+    BrightnessControlsList allControls = brightnessControlsAvailable();
+    QList<QString> controls = allControls.keys(controlType);
+
+    if (controls.isEmpty()) {
         return; // ignore as we are not able to determine the brightness level
     }
 
-    float currentBrightness = brightness(Screen);
+    if (type == Toggle && controlType == Screen) {
+        return; // ignore as we wont toggle the screen off
+    }
 
-    if (qFuzzyCompare(currentBrightness, m_cachedBrightness)) {
+    float currentBrightness = brightness(controlType);
+
+    int step = 10;
+    if (controlType == Keyboard) {
+        // In case the keyboard backlight has only 5 or less possible values,
+        // 10% are not enough to hit the next value. Lets use 30% because
+        // that jumps exactly one value for 2, 3, 4 and 5 possible steps
+        // when rounded.
+        if (m_kbdMaxBrightness < 6) {
+            step = 30;
+        }
+    }
+
+    if (qFuzzyCompare(currentBrightness, m_cachedBrightnessMap.value(controlType))) {
         float newBrightness;
         if (type == Increase) {
-            newBrightness = qMin(100.0f, currentBrightness + 10);
-        } else {
-            newBrightness = qMax(0.0f, currentBrightness - 10);
+            newBrightness = qMin(100.0f, currentBrightness + step);
+        } else if (type == Decrease) {
+            newBrightness = qMax(0.0f, currentBrightness - step);
+        } else { // Toggle On/off
+            newBrightness = currentBrightness > 0 ? 0 : 100;
         }
 
-        setBrightness(newBrightness, Screen);
+        setBrightness(newBrightness, controlType);
     } else {
-        m_cachedBrightness = currentBrightness;
+        m_cachedBrightnessMap[controlType] = currentBrightness;
     }
 }
 
@@ -245,7 +374,7 @@ float PowerDevilUPowerBackend::brightness(PowerDevil::BackendInterface::Brightne
         kDebug() << "Screen brightness: " << result;
     } else if (type == Keyboard) {
         kDebug() << "Kbd backlight brightness: " << m_kbdBacklight->GetBrightness();
-        result = m_kbdBacklight->GetBrightness() / m_kbdBacklight->GetMaxBrightness() * 100;
+        result = 1.0 * m_kbdBacklight->GetBrightness() / m_kbdMaxBrightness * 100;
     }
 
     return result;
@@ -273,20 +402,31 @@ bool PowerDevilUPowerBackend::setBrightness(float brightnessValue, PowerDevil::B
         success = true;
     } else if (type == Keyboard) {
         kDebug() << "set kbd backlight: " << brightnessValue;
-        m_kbdBacklight->SetBrightness(brightnessValue / 100 * m_kbdBacklight->GetMaxBrightness());
+        m_kbdBacklight->SetBrightness(qRound(brightnessValue / 100 * m_kbdMaxBrightness));
         success = true;
     }
 
-    if (success) {
-        float newBrightness = brightness(Screen);
-        if (!qFuzzyCompare(newBrightness, m_cachedBrightness)) {
-            m_cachedBrightness = newBrightness;
-            onBrightnessChanged(Screen, m_cachedBrightness);
-        }
-        return true;
-    }
+    return success;
+}
 
-    return false;
+void PowerDevilUPowerBackend::slotScreenBrightnessChanged()
+{
+    float newBrightness = brightness(Screen);
+    kDebug() << "Brightness changed!!";
+    if (!qFuzzyCompare(newBrightness, m_cachedBrightnessMap[Screen])) {
+        m_cachedBrightnessMap[Screen] = newBrightness;
+        onBrightnessChanged(Screen, m_cachedBrightnessMap[Screen]);
+    }
+}
+
+void PowerDevilUPowerBackend::onKeyboardBrightnessChanged(int value)
+{
+    kDebug() << "Keyboard brightness changed!!";
+    float realValue = 1.0 * value / m_kbdMaxBrightness * 100;
+    if (!qFuzzyCompare(realValue, m_cachedBrightnessMap[Keyboard])) {
+        m_cachedBrightnessMap[Keyboard] = realValue;
+        onBrightnessChanged(Keyboard, m_cachedBrightnessMap[Keyboard]);
+    }
 }
 
 KJob* PowerDevilUPowerBackend::suspend(PowerDevil::BackendInterface::SuspendMethod method)
@@ -325,6 +465,10 @@ void PowerDevilUPowerBackend::slotDeviceAdded(const QString & device)
             new OrgFreedesktopUPowerDeviceInterface(UPOWER_SERVICE, device, QDBusConnection::systemBus(), this);
     m_devices.insert(device, upowerDevice);
 
+    // for UPower >= 0.99.0 which doesn't emit the DeviceChanged(QString) signal
+    QDBusConnection::systemBus().connect(UPOWER_SERVICE, device, "org.freedesktop.DBus.Properties", "PropertiesChanged", this,
+                                         SLOT(onDevicePropertiesChanged(QString,QVariantMap,QStringList)));
+
     updateDeviceProps();
 }
 
@@ -337,6 +481,16 @@ void PowerDevilUPowerBackend::slotDeviceRemoved(const QString & device)
     updateDeviceProps();
 }
 
+void PowerDevilUPowerBackend::slotDeviceAdded(const QDBusObjectPath &path)
+{
+    slotDeviceAdded(path.path());
+}
+
+void PowerDevilUPowerBackend::slotDeviceRemoved(const QDBusObjectPath &path)
+{
+    slotDeviceRemoved(path.path());
+}
+
 void PowerDevilUPowerBackend::slotDeviceChanged(const QString & /*device*/)
 {
     updateDeviceProps();
@@ -347,9 +501,9 @@ void PowerDevilUPowerBackend::updateDeviceProps()
     qlonglong remainingTime = 0;
 
     foreach(OrgFreedesktopUPowerDeviceInterface * upowerDevice, m_devices) {
-        uint type = upowerDevice->type();
+        const uint type = upowerDevice->type();
         if (( type == 2 || type == 3) && upowerDevice->powerSupply()) {
-            uint state = upowerDevice->state();
+            const uint state = upowerDevice->state();
             if (state == 1) // charging
                 remainingTime += upowerDevice->timeToFull();
             else if (state == 2) //discharging
@@ -364,7 +518,7 @@ void PowerDevilUPowerBackend::slotPropertyChanged()
 {
     // check for lid button changes
     if (m_lidIsPresent) {
-        bool lidIsClosed = m_upowerInterface->lidIsClosed();
+        const bool lidIsClosed = m_upowerInterface->lidIsClosed();
         if (lidIsClosed != m_lidIsClosed) {
             if (lidIsClosed)
                 setButtonPressed(LidClose);
@@ -375,7 +529,7 @@ void PowerDevilUPowerBackend::slotPropertyChanged()
     }
 
     // check for AC adapter changes
-    bool onBattery = m_upowerInterface->onBattery();
+    const bool onBattery = m_upowerInterface->onBattery();
     if (m_onBattery != onBattery) {
         if (onBattery)
             setAcAdapterState(Unplugged);
@@ -384,6 +538,26 @@ void PowerDevilUPowerBackend::slotPropertyChanged()
     }
 
     m_onBattery = onBattery;
+}
+
+void PowerDevilUPowerBackend::onPropertiesChanged(const QString &ifaceName, const QVariantMap &changedProps, const QStringList &invalidatedProps)
+{
+    Q_UNUSED(changedProps);
+    Q_UNUSED(invalidatedProps);
+
+    if (ifaceName == UPOWER_IFACE) {
+        slotPropertyChanged(); // TODO maybe process the 2 properties separately?
+    }
+}
+
+void PowerDevilUPowerBackend::onDevicePropertiesChanged(const QString &ifaceName, const QVariantMap &changedProps, const QStringList &invalidatedProps)
+{
+    Q_UNUSED(changedProps);
+    Q_UNUSED(invalidatedProps);
+
+    if (ifaceName == UPOWER_IFACE_DEVICE) {
+        updateDeviceProps(); // TODO maybe process the properties separately?
+    }
 }
 
 void PowerDevilUPowerBackend::slotLogin1Resuming(bool active)

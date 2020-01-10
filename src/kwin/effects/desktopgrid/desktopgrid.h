@@ -25,38 +25,25 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <kwineffects.h>
 #include <kshortcut.h>
 #include <QObject>
-#include <QtCore/QTimeLine>
-#include <QtGui/QGraphicsView>
-
-namespace Plasma
-{
-class PushButton;
-class FrameSvg;
-}
+#include <QDeclarativeView>
+#include <QTimeLine>
 
 namespace KWin
 {
 
 class PresentWindowsEffectProxy;
 
-class DesktopButtonsView : public QGraphicsView
+class DesktopButtonsView : public QDeclarativeView
 {
     Q_OBJECT
 public:
-    DesktopButtonsView(QWidget* parent = 0);
+    explicit DesktopButtonsView(QWidget *parent = 0);
     void windowInputMouseEvent(QMouseEvent* e);
     void setAddDesktopEnabled(bool enable);
     void setRemoveDesktopEnabled(bool enable);
-    virtual void drawBackground(QPainter* painter, const QRectF& rect);
-
 Q_SIGNALS:
     void addDesktop();
     void removeDesktop();
-
-private:
-    Plasma::PushButton* m_addDesktopButton;
-    Plasma::PushButton* m_removeDesktopButton;
-    Plasma::FrameSvg* m_frame;
 };
 
 class DesktopGridEffect
@@ -79,7 +66,7 @@ public:
     virtual void postPaintScreen();
     virtual void prePaintWindow(EffectWindow* w, WindowPrePaintData& data, int time);
     virtual void paintWindow(EffectWindow* w, int mask, QRegion region, WindowPaintData& data);
-    virtual void windowInputMouseEvent(Window w, QEvent* e);
+    virtual void windowInputMouseEvent(QEvent* e);
     virtual void grabbedKeyboardEvent(QKeyEvent* e);
     virtual bool borderActivated(ElectricBorder border);
     virtual bool isActive() const;
@@ -115,8 +102,9 @@ private slots:
     void slotWindowAdded(KWin::EffectWindow* w);
     void slotWindowClosed(KWin::EffectWindow *w);
     void slotWindowDeleted(KWin::EffectWindow *w);
-    void slotNumberDesktopsChanged(int old);
+    void slotNumberDesktopsChanged(uint old);
     void slotWindowGeometryShapeChanged(KWin::EffectWindow *w, const QRect &old);
+    void setup();
 
 private:
     QPointF scalePos(const QPoint& pos, int desktop, int screen = -1) const;
@@ -130,7 +118,6 @@ private:
     int desktopUp(int desktop, bool wrap = true) const;
     int desktopDown(int desktop, bool wrap = true) const;
     void setActive(bool active);
-    void setup();
     void setupGrid();
     void finish();
     bool isMotionManagerMovingWindows() const;
@@ -152,7 +139,6 @@ private:
     int paintingDesktop;
     int highlightedDesktop;
     int m_originalMovingDesktop;
-    Window input;
     bool keyboardGrab;
     bool wasWindowMove, wasDesktopMove, isValidMove;
     EffectWindow* windowMove;

@@ -27,6 +27,7 @@ Item {
     id: lockScreen
     signal unlockRequested()
     property alias capsLockOn: unlockUI.capsLockOn
+    property bool locked: false
 
     PlasmaCore.Theme {
         id: theme
@@ -48,6 +49,7 @@ Item {
 
     PlasmaCore.FrameSvgItem {
         id: dialog
+        visible: lockScreen.locked
         anchors.centerIn: parent
         imagePath: "widgets/background"
         width: mainStack.currentPage.implicitWidth + margins.left + margins.right
@@ -82,11 +84,15 @@ Item {
     Greeter {
         id: unlockUI
 
-        switchUserEnabled: userSessionsUI.switchUserSupported
+        switchUserEnabled: sessions.switchUserSupported
+
+        Sessions {
+            id: sessions
+        }
 
         Connections {
             onAccepted: lockScreen.unlockRequested()
-            onSwitchUserClicked: { mainStack.push(userSessionsUI); userSessionsUI.forceActiveFocus(); }
+            onSwitchUserClicked: { mainStack.push(userSessionsUIComponent); mainStack.currentPage.forceActiveFocus(); }
         }
     }
 
@@ -95,15 +101,18 @@ Item {
         unlockUI.resetFocus();
     }
 
-    // TODO: loader
-    SessionSwitching {
-        id: userSessionsUI
-        visible: false
+    Component {
+        id: userSessionsUIComponent
 
-        Connections {
-            onCancel: returnToLogin()
-            onActivateSession: returnToLogin()
-            onStartNewSession: returnToLogin()
+        SessionSwitching {
+            id: userSessionsUI
+            visible: false
+
+            Connections {
+                onSwitchingCanceled: returnToLogin()
+                onSessionActivated: returnToLogin()
+                onNewSessionStarted: returnToLogin()
+            }
         }
     }
 }

@@ -22,10 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define KWIN_DASHBOARD_H
 
 #include <kwineffects.h>
-#include <QtCore/QTimeLine>
-#include <QGraphicsView>
-#include <QGraphicsItem>
-#include <Plasma/WindowEffects>
+#include <QTimeLine>
 
 namespace KWin
 {
@@ -43,9 +40,7 @@ public:
     virtual void paintWindow(EffectWindow* w, int mask, QRegion region, WindowPaintData& data);
     virtual void prePaintScreen(ScreenPrePaintData& data, int time);
     virtual void postPaintScreen();
-    virtual void propagate();
     virtual void reconfigure(ReconfigureFlags);
-    virtual void unpropagate();
     virtual bool isActive() const;
 
     // for properties

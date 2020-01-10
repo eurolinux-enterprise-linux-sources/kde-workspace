@@ -30,7 +30,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <kcmdlineargs.h>
 #include <kaboutdata.h>
 #include <kcrash.h>
-#include <unistd.h>
 #include <signal.h>
 #include <fcntl.h>
 #include <QX11Info>
@@ -67,12 +66,23 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "sm.h"
 #include "utils.h"
 #include "effects.h"
+#include "workspace.h"
+#include "xcbutils.h"
 
 #define INT8 _X11INT8
 #define INT32 _X11INT32
 #include <X11/Xproto.h>
 #undef INT8
 #undef INT32
+
+static bool isMultiHead()
+{
+    QByteArray multiHead = qgetenv("KDE_MULTIHEAD");
+    if (!multiHead.isEmpty()) {
+        return (multiHead.toLower() == "true");
+    }
+    return true;
+}
 
 namespace KWin
 {
@@ -92,6 +102,58 @@ bool initting = false;
  * and -rdynamic in CXXFLAGS for kBacktrace() to work.
  */
 static bool kwin_sync = false;
+
+//************************************
+// KWinSelectionOwner
+//************************************
+
+KWinSelectionOwner::KWinSelectionOwner(int screen_P)
+    : KSelectionOwner(make_selection_atom(screen_P), screen_P)
+{
+}
+
+Atom KWinSelectionOwner::make_selection_atom(int screen_P)
+{
+    if (screen_P < 0)
+        screen_P = DefaultScreen(display());
+    char tmp[ 30 ];
+    sprintf(tmp, "WM_S%d", screen_P);
+    return XInternAtom(display(), tmp, False);
+}
+
+void KWinSelectionOwner::getAtoms()
+{
+    KSelectionOwner::getAtoms();
+    if (xa_version == None) {
+        Atom atoms[ 1 ];
+        const char* const names[] =
+        { "VERSION" };
+        XInternAtoms(display(), const_cast< char** >(names), 1, False, atoms);
+        xa_version = atoms[ 0 ];
+    }
+}
+
+void KWinSelectionOwner::replyTargets(Atom property_P, Window requestor_P)
+{
+    KSelectionOwner::replyTargets(property_P, requestor_P);
+    Atom atoms[ 1 ] = { xa_version };
+    // PropModeAppend !
+    XChangeProperty(display(), requestor_P, property_P, XA_ATOM, 32, PropModeAppend,
+    reinterpret_cast< unsigned char* >(atoms), 1);
+}
+
+bool KWinSelectionOwner::genericReply(Atom target_P, Atom property_P, Window requestor_P)
+{
+    if (target_P == xa_version) {
+        long version[] = { 2, 0 };
+        XChangeProperty(display(), requestor_P, property_P, XA_INTEGER, 32,
+        PropModeReplace, reinterpret_cast< unsigned char* >(&version), 2);
+    } else
+        return KSelectionOwner::genericReply(target_P, property_P, requestor_P);
+    return true;
+}
+
+Atom KWinSelectionOwner::xa_version = None;
 
 // errorMessage is only used ifndef NDEBUG, and only in one place.
 // it might be worth reevaluating why this is used? I don't know.
@@ -129,24 +191,22 @@ static QByteArray errorMessage(const XErrorEvent& event, Display* dpy)
         // - Fetching it at startup means a bunch of roundtrips.
 
         // KWin here explicitly uses known extensions.
-        int nextensions;
-        const char** extensions;
-        int* majors;
-        int* error_bases;
-        Extensions::fillExtensionsData(extensions, nextensions, majors, error_bases);
         XGetErrorText(dpy, event.error_code, tmp, 255);
         int index = -1;
         int base = 0;
-        for (int i = 0; i < nextensions; ++i)
-            if (error_bases[i] != 0 &&
-                    event.error_code >= error_bases[i] && (index == -1 || error_bases[i] > base)) {
+        QVector<Xcb::ExtensionData> extensions = Xcb::Extensions::self()->extensions();
+        for (int i = 0; i < extensions.size(); ++i) {
+            const Xcb::ExtensionData &extension = extensions.at(i);
+            if (extension.errorBase != 0 &&
+                    event.error_code >= extension.errorBase && (index == -1 || extension.errorBase > base)) {
                 index = i;
-                base = error_bases[i];
+                base = extension.errorBase;
             }
+        }
         if (tmp == QString::number(event.error_code)) {
             // XGetErrorText() failed or it has a bug that causes not finding all errors, check ourselves
             if (index != -1) {
-                snprintf(num, 255, "%s.%d", extensions[index], event.error_code - base);
+                snprintf(num, 255, "%s.%d", extensions.at(index).name.constData(), event.error_code - base);
                 XGetErrorDatabaseText(dpy, "XProtoError", num, "<unknown>", tmp, 255);
             } else
                 strcpy(tmp, "<unknown>");
@@ -154,17 +214,17 @@ static QByteArray errorMessage(const XErrorEvent& event, Display* dpy)
         if (char* paren = strchr(tmp, '('))
             * paren = '\0';
         if (index != -1)
-            ret = QByteArray("error: ") + (const char*)(tmp) + '[' + (const char*)(extensions[index]) +
+            ret = QByteArray("error: ") + (const char*)(tmp) + '[' + extensions.at(index).name +
                   '+' + QByteArray::number(event.error_code - base) + ']';
         else
             ret = QByteArray("error: ") + (const char*)(tmp) + '[' + QByteArray::number(event.error_code) + ']';
         tmp[0] = '\0';
-        for (int i = 0; i < nextensions; ++i)
-            if (majors[i] == event.request_code) {
-                snprintf(num, 255, "%s.%d", extensions[i], event.minor_code);
+        for (int i = 0; i < extensions.size(); ++i)
+            if (extensions.at(i).majorOpcode == event.request_code) {
+                snprintf(num, 255, "%s.%d", extensions.at(i).name.constData(), event.minor_code);
                 XGetErrorDatabaseText(dpy, "XRequest", num, "<unknown>", tmp, 255);
                 ret += QByteArray(", request: ") + (const char*)(tmp) + '[' +
-                       (const char*)(extensions[i]) + '+' + QByteArray::number(event.minor_code) + ']';
+                       extensions.at(i).name + '+' + QByteArray::number(event.minor_code) + ']';
             }
         if (tmp[0] == '\0')   // Not found?
             ret += QByteArray(", request <unknown> [") + QByteArray::number(event.request_code) + ':'
@@ -396,7 +456,7 @@ void Application::resetCrashesCount()
 
 } // namespace
 
-static const char version[] = KDE_VERSION_STRING;
+static const char version[] = KWIN_VERSION_STRING;
 static const char description[] = I18N_NOOP("KDE window manager");
 
 extern "C"
@@ -443,7 +503,7 @@ KDE_EXPORT int kdemain(int argc, char * argv[])
     int number_of_screens = ScreenCount(dpy);
 
     // multi head
-    if (number_of_screens != 1) {
+    if (number_of_screens != 1 && isMultiHead()) {
         KWin::is_multihead = true;
         KWin::screen_number = DefaultScreen(dpy);
         int pos; // Temporarily needed to reconstruct DISPLAY var if multi-head
@@ -487,7 +547,7 @@ KDE_EXPORT int kdemain(int argc, char * argv[])
     aboutData.addAuthor(ki18n("Cristian Tibirna"), KLocalizedString(), "tibirna@kde.org");
     aboutData.addAuthor(ki18n("Daniel M. Duley"), KLocalizedString(), "mosfet@kde.org");
     aboutData.addAuthor(ki18n("Luboš Luňák"), KLocalizedString(), "l.lunak@kde.org");
-    aboutData.addAuthor(ki18n("Martin Gräßlin"), ki18n("Maintainer"), "kde@martin-graesslin.com");
+    aboutData.addAuthor(ki18n("Martin Gräßlin"), ki18n("Maintainer"), "mgraesslin@kde.org");
 
     KCmdLineArgs::init(argc, argv, &aboutData);
 
@@ -516,6 +576,8 @@ KDE_EXPORT int kdemain(int argc, char * argv[])
     KWin::SessionManager weAreIndeed;
     KWin::SessionSaveDoneHelper helper;
     KGlobal::locale()->insertCatalog("kwin_effects");
+    KGlobal::locale()->insertCatalog("kwin_scripts");
+    KGlobal::locale()->insertCatalog("kwin_scripting");
 
     // Announce when KWIN_DIRECT_GL is set for above HACK
     if (qstrcmp(qgetenv("KWIN_DIRECT_GL"), "1") == 0)
@@ -531,8 +593,6 @@ KDE_EXPORT int kdemain(int argc, char * argv[])
 
     QDBusConnection::sessionBus().interface()->registerService(
         appname, QDBusConnectionInterface::DontQueueService);
-
-    KCmdLineArgs* sargs = KCmdLineArgs::parsedArgs();
 
     return a.exec();
 }

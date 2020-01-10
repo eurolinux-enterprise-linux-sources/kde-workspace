@@ -31,6 +31,7 @@
 
 class QMenu;
 class QDropEvent;
+class QSignalMapper;
 
 class KActionCollection;
 class KDesktopFile;
@@ -40,12 +41,30 @@ class MenuEntryInfo;
 class MenuSeparatorInfo;
 class KShortcut;
 
+static const QString SAVE_ACTION_NAME = "file_save";
+static const QString NEW_ITEM_ACTION_NAME = "new_item";
+static const QString NEW_SUBMENU_ACTION_NAME = "new_submenu";
+static const QString NEW_SEPARATOR_ACTION_NAME = "new_separator";
+static const QString CUT_ACTION_NAME = "edit_cut";
+static const QString COPY_ACTION_NAME = "edit_copy";
+static const QString PASTE_ACTION_NAME = "edit_paste";
+static const QString DELETE_ACTION_NAME = "delete";
+static const QString SORT_ACTION_NAME = "sort";
+static const QString SORT_BY_NAME_ACTION_NAME = "sort_by_name";
+static const QString SORT_BY_DESCRIPTION_ACTION_NAME = "sort_by_description";
+static const QString SORT_ALL_BY_NAME_ACTION_NAME = "sort_all_by_name";
+static const QString SORT_ALL_BY_DESCRIPTION_ACTION_NAME = "sort_all_by_description";
+static const QString MOVE_UP_ACTION_NAME = "move_up";
+static const QString MOVE_DOWN_ACTION_NAME = "move_down";
+
 class TreeItem : public QTreeWidgetItem
 {
 public:
     TreeItem(QTreeWidgetItem *parent, QTreeWidgetItem *after, const QString &menuId, bool __init = false);
     TreeItem(QTreeWidget *parent, QTreeWidgetItem *after, const QString &menuId, bool __init = false);
     ~TreeItem();
+    static bool itemNameLessThan(QTreeWidgetItem *item1, QTreeWidgetItem *item2);
+    static bool itemDescriptionLessThan(QTreeWidgetItem *item1, QTreeWidgetItem *item2);
 
     QString menuId() const { return m_menuId; }
 
@@ -55,14 +74,17 @@ public:
     MenuFolderInfo *folderInfo() { return m_folderInfo; }
     void setMenuFolderInfo(MenuFolderInfo *folderInfo) { m_folderInfo = folderInfo; }
 
-    MenuEntryInfo *entryInfo() { return m_entryInfo; }
+    MenuEntryInfo *entryInfo() const { return m_entryInfo; }
     void setMenuEntryInfo(MenuEntryInfo *entryInfo) { m_entryInfo = entryInfo; }
 
     QString name() const { return m_name; }
     void setName(const QString &name);
 
+    QString description() const;
+
     bool isDirectory() const { return m_folderInfo; }
     bool isEntry() const { return m_entryInfo; }
+    bool isSeparator() const { return !isDirectory() && !isEntry(); }
 
     bool isHiddenInMenu() const { return m_hidden; }
     void setHiddenInMenu(bool b);
@@ -131,8 +153,18 @@ protected Q_SLOTS:
     void copy();
     void paste();
     void del();
+    void sort(const int sortCmd);
+    void moveUpItem();
+    void moveDownItem();
 
 protected:
+    enum SortType {
+    SortByName = 0,
+    SortByDescription,
+    SortAllByName,
+    SortAllByDescription
+    };
+
     void contextMenuEvent(QContextMenuEvent *event);
     void dropEvent(QDropEvent *event);
     void startDrag(Qt::DropActions supportedActions);
@@ -145,6 +177,10 @@ protected:
     void fill();
     void fillBranch(MenuFolderInfo *folderInfo, TreeItem *parent);
     QString findName(KDesktopFile *df, bool deleted);
+    void sortItem(TreeItem *item, const SortType& sortType);
+    void sortItemChildren(const QList<QTreeWidgetItem*>::iterator& begin, const QList<QTreeWidgetItem*>::iterator& end, const SortType& sortType);
+    TreeItem* getParentItem(QTreeWidgetItem *item) const;
+    void moveUpOrDownItem(bool isMovingUpAction);
 
     void closeAllItems(QTreeWidgetItem *item);
     TreeItem *expandPath(TreeItem *item, const QString &path);
@@ -169,7 +205,7 @@ protected:
 
 private:
     KActionCollection *m_ac;
-    QMenu             *m_rmb;
+    QMenu             *m_popupMenu;
     int                m_clipboard;
     MenuFolderInfo    *m_clipboardFolderInfo;
     MenuEntryInfo     *m_clipboardEntryInfo;
@@ -183,6 +219,7 @@ private:
     bool               m_detailedMenuEntries;
     bool               m_detailedEntriesNamesFirst;
     QStringList        m_dropMimeTypes;
+    QSignalMapper     *m_sortSignalMapper;
 };
 
 class MenuItemMimeData : public QMimeData

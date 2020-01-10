@@ -32,6 +32,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <KDE/KDebug>
 #include <KDE/KStandardDirs>
 #include <KDE/KUser>
+#include <KDE/KWindowSystem>
 #include <Solid/PowerManagement>
 #include <kdeclarative.h>
 //Plasma
@@ -45,14 +46,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QtDeclarative/QDeclarativeProperty>
 #include <QtDeclarative/QDeclarativeView>
 #include <QtDeclarative/qdeclarative.h>
-#include <QtDBus/QDBusInterface>
-#include <QtDBus/QDBusPendingCall>
 #include <QtGui/QKeyEvent>
 #include <QDesktopWidget>
 // X11
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <fixx11h.h>
+
+// this is usable to fake a "screensaver" installation for testing
+// *must* be "0" for every public commit!
+#define TEST_SCREENSAVER 0
 
 namespace ScreenLocker
 {
@@ -63,15 +66,17 @@ static const char *DEFAULT_MAIN_PACKAGE = "org.kde.passworddialog";
 UnlockApp::UnlockApp()
     : KApplication()
     , m_resetRequestIgnoreTimer(new QTimer(this))
+    , m_delayedLockTimer(0)
     , m_testing(false)
     , m_capsLocked(false)
     , m_ignoreRequests(false)
     , m_showScreenSaver(false)
+    , m_immediateLock(false)
+    , m_runtimeInitialized(false)
 {
     initialize();
     connect(desktop(), SIGNAL(resized(int)), SLOT(desktopResized()));
     connect(desktop(), SIGNAL(screenCountChanged(int)), SLOT(desktopResized()));
-    QMetaObject::invokeMethod(this, "desktopResized", Qt::QueuedConnection);
 }
 
 UnlockApp::~UnlockApp()
@@ -98,7 +103,11 @@ void UnlockApp::initialize()
     KCrash::setDrKonqiEnabled(false);
 
     KScreenSaverSettings::self()->readConfig();
+#if TEST_SCREENSAVER
+    m_showScreenSaver = true;
+#else
     m_showScreenSaver = KScreenSaverSettings::legacySaverEnabled();
+#endif
 
     m_structure = Plasma::PackageStructure::load("Plasma/Generic");
     m_package = new Plasma::Package(KStandardDirs::locate("data", "ksmserver/screenlocker/"), KScreenSaverSettings::greeterQML(), m_structure);
@@ -142,13 +151,12 @@ void UnlockApp::desktopResized()
     const bool canLogout = KAuthorized::authorizeKAction("logout") && KAuthorized::authorize("logout");
     const QSet<Solid::PowerManagement::SleepState> spdMethods = Solid::PowerManagement::supportedSleepStates();
     for (int i = m_views.count(); i < nScreens; ++i) {
-        // create the view
-        QDeclarativeView *view = new QDeclarativeView();
+        // create the view - we need create a view per screen in multihead cases
+        QDeclarativeView *view = new QDeclarativeView(desktop()->screen(i));
         connect(view, SIGNAL(statusChanged(QDeclarativeView::Status)),
                 this, SLOT(viewStatusChanged(QDeclarativeView::Status)));
         view->setWindowFlags(Qt::X11BypassWindowManagerHint);
         view->setFrameStyle(QFrame::NoFrame);
-        view->installEventFilter(this);
 
         // engine stuff
         KDeclarative kdeclarative;
@@ -164,6 +172,29 @@ void UnlockApp::desktopResized()
         view->setResizeMode(QDeclarativeView::SizeRootObjectToView);
 
         connect(view->rootObject(), SIGNAL(unlockRequested()), SLOT(quit()));
+
+        QDeclarativeProperty lockProperty(view->rootObject(), "locked");
+        if (m_immediateLock) {
+            lockProperty.write(true);
+        } else if (KScreenSaverSettings::lock()) {
+            if (KScreenSaverSettings::lockGrace() < 1) {
+                lockProperty.write(true);
+            } else if (m_runtimeInitialized) {
+                // if we have new views and we are waiting on the
+                // delayed lock timer still, we don't want to show
+                // the lock UI just yet
+                lockProperty.write(!m_delayedLockTimer);
+            } else {
+                if (!m_delayedLockTimer) {
+                    m_delayedLockTimer = new QTimer(this);
+                    m_delayedLockTimer->setSingleShot(true);
+                    connect(m_delayedLockTimer, SIGNAL(timeout()), this, SLOT(setLockedPropertyOnViews()));
+                }
+                m_delayedLockTimer->start(KScreenSaverSettings::lockGrace());
+            }
+        } else {
+            lockProperty.write(false);
+        }
 
         QDeclarativeProperty sleepProperty(view->rootObject(), "suspendToRamSupported");
         sleepProperty.write(spdMethods.contains(Solid::PowerManagement::SuspendState));
@@ -195,6 +226,8 @@ void UnlockApp::desktopResized()
         }
     }
 
+    m_runtimeInitialized = true;
+
     // update geometry of all views and savers
     for (int i = 0; i < nScreens; ++i) {
         QDeclarativeView *view = m_views.at(i);
@@ -207,11 +240,15 @@ void UnlockApp::desktopResized()
             ScreenSaverWindow *screensaverWindow = m_screensaverWindows.at(i);
             screensaverWindow->setGeometry(view->geometry());
 
+#if TEST_SCREENSAVER
+            screensaverWindow->setAutoFillBackground(true);
+#else
             QPixmap backgroundPix(screensaverWindow->size());
             QPainter p(&backgroundPix);
             view->render(&p);
             p.end();
             screensaverWindow->setBackground(backgroundPix);
+#endif
             screensaverWindow->show();
             screensaverWindow->activateWindow();
             connect(screensaverWindow, SIGNAL(hidden()), this, SLOT(getFocus()));
@@ -219,13 +256,62 @@ void UnlockApp::desktopResized()
     }
     // random state update, actually rather required on init only
     QMetaObject::invokeMethod(this, "getFocus", Qt::QueuedConnection);
+    // getFocus on the next event cycle does not work as expected for multiple views
+    // if there's no screensaver, hiding it won't happen and thus not trigger getFocus either
+    // so we call it again in a few miliseconds - the value is nearly random but "must cross some event cycles"
+    // while 150ms worked for me, 250ms gets us a bit more padding without being notable to a human user
+    if (nScreens > 1 && m_screensaverWindows.isEmpty()) {
+        QTimer::singleShot(250, this, SLOT(getFocus()));
+    }
     capsLocked();
 }
 
 void UnlockApp::getFocus()
 {
-    if (!m_views.isEmpty()) {
-        m_views.first()->activateWindow();
+    if (m_views.isEmpty()) {
+        return;
+    }
+    QWidget *w = 0;
+    // this loop is required to make the qml/graphicsscene properly handle the shared keyboard input
+    // ie. "type something into the box of every greeter"
+    foreach (QDeclarativeView *view, m_views) {
+        view->activateWindow();
+        view->grabKeyboard();
+        view->setFocus(Qt::OtherFocusReason);
+    }
+    // determine which window should actually be active and have the real input focus/grab
+    foreach (QDeclarativeView *view, m_views) {
+        if (view->underMouse()) {
+            w = view;
+            break;
+        }
+    }
+    if (!w) { // try harder
+        foreach (QDeclarativeView *view, m_views) {
+            if (view->geometry().contains(QCursor::pos())) {
+                w = view;
+                break;
+            }
+        }
+    }
+    if (!w) { // fallback solution
+        w = m_views.first();
+    }
+    // activate window and grab input to be sure it really ends up there.
+    // focus setting is still required for proper internal QWidget state (and eg. visual reflection)
+    w->grabKeyboard();
+    w->activateWindow();
+    w->setFocus(Qt::OtherFocusReason);
+}
+
+void UnlockApp::setLockedPropertyOnViews()
+{
+    delete m_delayedLockTimer;
+    m_delayedLockTimer = 0;
+
+    foreach (QDeclarativeView *view, m_views) {
+        QDeclarativeProperty lockProperty(view->rootObject(), "locked");
+        lockProperty.write(true);
     }
 }
 
@@ -243,10 +329,7 @@ void UnlockApp::suspendToRam()
     m_ignoreRequests = true;
     m_resetRequestIgnoreTimer->start();
 
-    QDBusInterface iface("org.kde.Solid.PowerManagement",
-            "/org/kde/Solid/PowerManagement",
-            "org.kde.Solid.PowerManagement");
-    iface.asyncCall("suspendToRam");
+    Solid::PowerManagement::requestSleep(Solid::PowerManagement::SuspendState, 0, 0);
 
 }
 
@@ -259,10 +342,7 @@ void UnlockApp::suspendToDisk()
     m_ignoreRequests = true;
     m_resetRequestIgnoreTimer->start();
 
-    QDBusInterface iface("org.kde.Solid.PowerManagement",
-            "/org/kde/Solid/PowerManagement",
-            "org.kde.Solid.PowerManagement");
-    iface.asyncCall("suspendToDisk");
+    Solid::PowerManagement::requestSleep(Solid::PowerManagement::HibernateState, 0, 0);
 }
 
 void UnlockApp::shutdown()
@@ -298,6 +378,17 @@ void UnlockApp::setTesting(bool enable)
     }
 }
 
+void UnlockApp::setImmediateLock(bool immediate)
+{
+    m_immediateLock = immediate;
+}
+
+void UnlockApp::lockImmediately()
+{
+    setImmediateLock(true);
+    setLockedPropertyOnViews();
+}
+
 bool UnlockApp::eventFilter(QObject *obj, QEvent *event)
 {
     if (obj != this && event->type() == QEvent::Show) {
@@ -319,14 +410,15 @@ bool UnlockApp::eventFilter(QObject *obj, QEvent *event)
 
     static bool ignoreNextEscape = false;
     if (event->type() == QEvent::KeyPress) { // react if saver is visible
-        bool saverVisible = false;
+        bool saverVisible = !m_screensaverWindows.isEmpty();
         foreach (ScreenSaverWindow *screensaverWindow, m_screensaverWindows) {
-            if (screensaverWindow->isVisible()) {
-                saverVisible = true;
+            if (!screensaverWindow->isVisible()) {
+                saverVisible = false;
                 break;
             }
         }
         if (!saverVisible) {
+            shareEvent(event, qobject_cast<QDeclarativeView*>(obj));
             return false; // we don't care
         }
         ignoreNextEscape = bool(static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape);
@@ -343,6 +435,7 @@ bool UnlockApp::eventFilter(QObject *obj, QEvent *event)
             return false;
         }
         if (ke->key() != Qt::Key_Escape) {
+            shareEvent(event, qobject_cast<QDeclarativeView*>(obj));
             return false; // irrelevant
         }
         if (ignoreNextEscape) {
@@ -390,6 +483,34 @@ void UnlockApp::capsLocked()
         foreach (QDeclarativeView *view, m_views) {
             view->rootObject()->setProperty("capsLockOn", m_capsLocked);
         }
+    }
+}
+
+/*
+ * This function forwards an event from one greeter window to all others
+ * It's used to have the keyboard operate on all greeter windows (on every screen)
+ * at once so that the user gets visual feedback on the screen he's looking at -
+ * even if the focus is actually on a powered off screen.
+ */
+
+void UnlockApp::shareEvent(QEvent *e, QDeclarativeView *from)
+{
+    // from can be NULL any time (because the parameter is passed as qobject_cast)
+    // m_views.contains(from) is atm. supposed to be true but required if any further
+    // QDeclarativeViews are added (which are not part of m_views)
+    // this makes "from" an optimization (nullptr check aversion)
+    if (from && m_views.contains(from)) {
+        // NOTICE any recursion in the event sharing will prevent authentication on multiscreen setups!
+        // Any change in regarded event processing shall be tested thoroughly!
+        removeEventFilter(this); // prevent recursion!
+        const bool accepted = e->isAccepted(); // store state
+        foreach (QDeclarativeView *view, m_views) {
+            if (view != from) {
+                QApplication::sendEvent(view, e);
+                e->setAccepted(accepted);
+            }
+        }
+        installEventFilter(this);
     }
 }
 

@@ -21,15 +21,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef KWIN_LIB_KWINGLOBALS_H
 #define KWIN_LIB_KWINGLOBALS_H
 
-#include <QtGui/QX11Info>
-#include <QtCore/QPoint>
-#include <QtGui/QRegion>
+#include <QX11Info>
 
 #include <kdemacros.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xlib-xcb.h>
 #include <fixx11h.h>
+#include <xcb/xcb.h>
 
 #include <kwinconfig.h>
 
@@ -85,19 +84,6 @@ enum ElectricBorder {
     ElectricNone
 };
 
-enum QuickTileFlag {
-    QuickTileNone = 0,
-    QuickTileLeft = 1,
-    QuickTileRight = 1<<1,
-    QuickTileTop = 1<<2,
-    QuickTileBottom = 1<<3,
-    QuickTileHorizontal = QuickTileLeft|QuickTileRight,
-    QuickTileVertical = QuickTileTop|QuickTileBottom,
-    QuickTileMaximize = QuickTileLeft|QuickTileRight|QuickTileTop|QuickTileBottom
-};
-
-Q_DECLARE_FLAGS(QuickTileMode, QuickTileFlag)
-
 // TODO: Hardcoding is bad, need to add some way of registering global actions to these.
 // When designing the new system we must keep in mind that we have conditional actions
 // such as "only when moving windows" desktop switching that the current global action
@@ -124,7 +110,9 @@ enum TabBoxMode {
 };
 
 enum KWinOption {
-    CloseButtonCorner
+    CloseButtonCorner,
+    SwitchDesktopOnScreenEdge,
+    SwitchDesktopOnScreenEdgeMovingWindows
 };
 
 inline
@@ -136,93 +124,101 @@ KWIN_EXPORT Display* display()
 inline
 KWIN_EXPORT xcb_connection_t *connection()
 {
-    return XGetXCBConnection(display());
+    static xcb_connection_t *s_con = NULL;
+    if (!s_con) {
+        s_con = XGetXCBConnection(display());
+    }
+    return s_con;
 }
 
 inline
-KWIN_EXPORT Window rootWindow()
+KWIN_EXPORT xcb_window_t rootWindow()
 {
     return QX11Info::appRootWindow();
 }
 
 inline
-KWIN_EXPORT Window xTime()
+KWIN_EXPORT xcb_timestamp_t xTime()
 {
     return QX11Info::appTime();
 }
 
 inline
+KWIN_EXPORT xcb_screen_t *defaultScreen()
+{
+    static xcb_screen_t *s_screen = NULL;
+    if (s_screen) {
+        return s_screen;
+    }
+    int screen = QX11Info::appScreen();
+    for (xcb_screen_iterator_t it = xcb_setup_roots_iterator(xcb_get_setup(connection()));
+            it.rem;
+            --screen, xcb_screen_next(&it)) {
+        if (screen == 0) {
+            s_screen = it.data;
+        }
+    }
+    return s_screen;
+}
+
+inline
 KWIN_EXPORT int displayWidth()
 {
+#if 0
+    xcb_screen_t *screen = defaultScreen();
+    return screen ? screen->width_in_pixels : 0;
+#else
     return XDisplayWidth(display(), DefaultScreen(display()));
+#endif
 }
 
 inline
 KWIN_EXPORT int displayHeight()
 {
+#if 0
+    xcb_screen_t *screen = defaultScreen();
+    return screen ? screen->height_in_pixels : 0;
+#else
     return XDisplayHeight(display(), DefaultScreen(display()));
+#endif
 }
 
 /** @internal */
+// TODO: QT5: remove
 class KWIN_EXPORT Extensions
 {
 public:
     static void init();
-    static bool shapeAvailable() {
-        return shape_version > 0;
-    }
-    static bool shapeInputAvailable();
-    static int shapeNotifyEvent();
-    static bool hasShape(Window w);
-    static bool randrAvailable() {
-        return has_randr;
-    }
-    static int randrNotifyEvent();
-    static bool damageAvailable() {
-        return has_damage;
-    }
-    static int damageNotifyEvent();
-    static bool compositeAvailable() {
-        return composite_version > 0;
-    }
-    static bool compositeOverlayAvailable();
-    static bool renderAvailable() {
-        return render_version > 0;
-    }
-    static bool fixesAvailable() {
-        return fixes_version > 0;
-    }
-    static bool fixesRegionAvailable();
-    static bool syncAvailable() {
-        return has_sync;
-    }
     static bool nonNativePixmaps() {
         return non_native_pixmaps;
     }
-    static int syncAlarmNotifyEvent();
-    static void fillExtensionsData(const char**& extensions, int& nextensions, int*&majors, int*& error_bases);
 private:
-    static void addData(const char* name);
-    static int shape_version;
-    static int shape_event_base;
-    static bool has_randr;
-    static int randr_event_base;
-    static bool has_damage;
-    static int damage_event_base;
-    static int composite_version;
-    static int render_version;
-    static int fixes_version;
-    static bool has_sync;
-    static int sync_event_base;
-    static const char* data_extensions[ 32 ];
-    static int data_nextensions;
-    static int data_opcodes[ 32 ];
-    static int data_error_bases[ 32 ];
     static bool non_native_pixmaps;
 };
 
 } // namespace
 
-Q_DECLARE_OPERATORS_FOR_FLAGS(KWin::QuickTileMode)
+#define KWIN_SINGLETON_VARIABLE(ClassName, variableName) \
+public: \
+    static ClassName *create(QObject *parent = 0);\
+    static ClassName *self() { return variableName; }\
+protected: \
+    explicit ClassName(QObject *parent = 0); \
+private: \
+    static ClassName *variableName;
+
+#define KWIN_SINGLETON(ClassName) KWIN_SINGLETON_VARIABLE(ClassName, s_self)
+
+#define KWIN_SINGLETON_FACTORY_VARIABLE_FACTORED(ClassName, FactoredClassName, variableName) \
+ClassName *ClassName::variableName = 0; \
+ClassName *ClassName::create(QObject *parent) \
+{ \
+    Q_ASSERT(!variableName); \
+    variableName = new FactoredClassName(parent); \
+    return variableName; \
+}
+#define KWIN_SINGLETON_FACTORY_VARIABLE(ClassName, variableName) KWIN_SINGLETON_FACTORY_VARIABLE_FACTORED(ClassName, ClassName, variableName)
+#define KWIN_SINGLETON_FACTORY_FACTORED(ClassName, FactoredClassName) KWIN_SINGLETON_FACTORY_VARIABLE_FACTORED(ClassName, FactoredClassName, s_self)
+#define KWIN_SINGLETON_FACTORY(ClassName) KWIN_SINGLETON_FACTORY_VARIABLE(ClassName, s_self)
 
 #endif

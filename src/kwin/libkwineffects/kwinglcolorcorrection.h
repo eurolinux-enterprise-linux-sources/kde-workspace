@@ -21,11 +21,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef KWIN_COLOR_CORRECTION_H
 #define KWIN_COLOR_CORRECTION_H
 
-#include "kwinglutils_funcs.h"
+#include "kwinglobals.h"
 
 #include <QObject>
-#include <QMap>
-#include <QRect>
 
 namespace KWin {
 
@@ -71,12 +69,19 @@ public:
      */
     static QByteArray prepareFragmentShader(const QByteArray &sourceCode);
 
+    /**
+     * @return whether color correction is enabled
+     */
+    bool isEnabled() const;
+
 public slots:
     /**
      * Enables or disables color correction. Compositing should be restarted
      * for changes to take effect.
+     *
+     * @return true when successful
      */
-    void setEnabled(bool enabled);
+    bool setEnabled(bool enabled);
 
 signals:
     /**
@@ -84,6 +89,12 @@ signals:
      * a full repaint of the scene should be done to make the new settings visible.
      */
     void changed();
+
+    /**
+     * Emitted when something failed because of an error (probably a GL error)
+     * The description of the error should be found in the logs.
+     */
+    void errorOccured();
 
 private:
     ColorCorrectionPrivate * const d_ptr;

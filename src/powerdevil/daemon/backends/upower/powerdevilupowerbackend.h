@@ -32,10 +32,17 @@
 #include "upower_device_interface.h"
 #include "upower_interface.h"
 #include "upower_kbdbacklight_interface.h"
+#include "udevqt.h"
 
 #define UPOWER_SERVICE "org.freedesktop.UPower"
+#define UPOWER_PATH "/org/freedesktop/UPower"
+#define UPOWER_IFACE "org.freedesktop.UPower"
+#define UPOWER_IFACE_DEVICE "org.freedesktop.UPower.Device"
+
 #define LOGIN1_SERVICE "org.freedesktop.login1"
 
+class UdevHelper;
+class XRandRX11Helper;
 class XRandrBrightness;
 
 class KDE_EXPORT PowerDevilUPowerBackend : public PowerDevil::BackendInterface
@@ -51,7 +58,7 @@ public:
 
     virtual float brightness(BrightnessControlType type = Screen) const;
 
-    virtual void brightnessKeyPressed(PowerDevil::BackendInterface::BrightnessKeyType type);
+    virtual void brightnessKeyPressed(PowerDevil::BackendInterface::BrightnessKeyType type, PowerDevil::BackendInterface::BrightnessControlType controlType);
     virtual bool setBrightness(float brightness, PowerDevil::BackendInterface::BrightnessControlType type = Screen);
     virtual KJob* suspend(PowerDevil::BackendInterface::SuspendMethod method);
 
@@ -62,19 +69,30 @@ private slots:
     void updateDeviceProps();
     void slotDeviceAdded(const QString &);
     void slotDeviceRemoved(const QString &);
+    void slotDeviceAdded(const QDBusObjectPath & path);
+    void slotDeviceRemoved(const QDBusObjectPath & path);
     void slotDeviceChanged(const QString &);
     void slotPropertyChanged();
     void slotLogin1Resuming(bool active);
+    void slotScreenBrightnessChanged();
+    void onDeviceChanged(const UdevQt::Device &device);
+    void onKeyboardBrightnessChanged(int);
+
+    void onPropertiesChanged(const QString &ifaceName, const QVariantMap &changedProps, const QStringList &invalidatedProps);
+    void onDevicePropertiesChanged(const QString &ifaceName, const QVariantMap &changedProps, const QStringList &invalidatedProps);
 
 private:
     // upower devices
     QMap<QString, OrgFreedesktopUPowerDeviceInterface *> m_devices;
 
     // brightness
-    float m_cachedBrightness;
+    QMap<BrightnessControlType, float> m_cachedBrightnessMap;
     XRandrBrightness         *m_brightnessControl;
+    XRandRX11Helper *m_randrHelper;
+
     OrgFreedesktopUPowerInterface *m_upowerInterface;
     OrgFreedesktopUPowerKbdBacklightInterface *m_kbdBacklight;
+    int m_kbdMaxBrightness;
 
     // login1 interface
     QWeakPointer<QDBusInterface> m_login1Interface;
@@ -83,6 +101,9 @@ private:
     bool m_lidIsPresent;
     bool m_lidIsClosed;
     bool m_onBattery;
+
+    //helper path
+    QString m_syspath;
 };
 
 #endif // POWERDEVILUPOWERBACKEND_H

@@ -44,7 +44,8 @@ PlasmaComponents.ListItem {
         repeat: false
         running: !idleTimeSource.idle
         onTriggered: {
-            notificationsModel.remove(index)
+            if (!notificationsModel.inserting)
+                notificationsModel.remove(index)
         }
     }
 
@@ -115,10 +116,11 @@ PlasmaComponents.ListItem {
                         left: parent.left
                         right: parent.right
                         leftMargin: closeButton.width
-                        rightMargin: closeButton.width
+                        rightMargin: settingsButton.visible ? settingsButton.width + closeButton.width : closeButton.width
                     }
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
+                    onLinkActivated: plasmoid.openUrl(link)
                 }
 
                 PlasmaComponents.ToolButton {
@@ -130,12 +132,30 @@ PlasmaComponents.ListItem {
                         if (notificationsModel.count > 1) {
                             removeAnimation.running = true
                         } else {
+                            closeNotification(model.source)
                             notificationsModel.remove(index)
                         }
                     }
                     anchors {
                         top: parent.top
                         right: parent.right
+                    }
+                }
+
+                PlasmaComponents.ToolButton {
+                    id: settingsButton
+                    iconSource: "configure"
+                    width: notificationItem.toolIconSize
+                    height: width
+                    visible: model.configurable
+                    onClicked: {
+                        plasmoid.hidePopup()
+                        configureNotification(model.appRealName)
+                    }
+                    anchors {
+                        top: parent.top
+                        right: closeButton.left
+                        rightMargin: 5
                     }
                 }
             }
@@ -204,6 +224,7 @@ PlasmaComponents.ListItem {
                         readOnly: true
                         wrapMode: Text.Wrap
                         textFormat: TextEdit.RichText
+                        onLinkActivated: plasmoid.openUrl(link)
                     }
                 }
                 Column {

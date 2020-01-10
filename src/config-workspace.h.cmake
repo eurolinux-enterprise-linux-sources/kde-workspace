@@ -119,6 +119,9 @@
 /* Define to 1 if you have the `vsnprintf' function. */
 #cmakedefine HAVE_VSNPRINTF 1
 
+/* Define to 1 if you have the Wayland libraries. */
+#cmakedefine WAYLAND_FOUND 1
+
 /* KDE's default home directory */
 #cmakedefine KDE_DEFAULT_HOME "${KDE_DEFAULT_HOME}"
 
@@ -152,3 +155,5 @@
 
 /* type to use in place of socklen_t if not defined */
 #define kde_socklen_t socklen_t
+
+#define WORKSPACE_VERSION_STRING "${KDE4WORKSPACE_VERSION}"

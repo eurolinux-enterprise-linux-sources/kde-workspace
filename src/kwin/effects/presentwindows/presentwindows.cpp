@@ -24,26 +24,27 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "presentwindowsconfig.h"
 #include <kactioncollection.h>
 #include <kaction.h>
-#include <klocale.h>
+#include <KDE/KGlobal>
+#include <KDE/KIcon>
+#include <KDE/KLocalizedString>
+#include <KDE/KStandardDirs>
 #include <kdebug.h>
 #include <kglobalsettings.h>
+#include <kdeclarative.h>
 
 #include <kwinglutils.h>
 
 #include <QMouseEvent>
-#include <QtGui/QPainter>
-#include <QtGui/QGraphicsLinearLayout>
-#include <Plasma/FrameSvg>
-#include <Plasma/PushButton>
-#include <Plasma/Theme>
-#include <Plasma/WindowEffects>
 #include <netwm_def.h>
 
 #include <math.h>
 #include <assert.h>
 #include <limits.h>
 #include <QApplication>
+#include <QDeclarativeContext>
+#include <QDeclarativeEngine>
 #include <QDesktopWidget>
+#include <QGraphicsObject>
 #include <QTimer>
 #include <QVector2D>
 #include <QVector4D>
@@ -61,6 +62,7 @@ PresentWindowsEffect::PresentWindowsEffect()
     , m_hasKeyboardGrab(false)
     , m_mode(ModeCurrentDesktop)
     , m_managerWindow(NULL)
+    , m_needInitialSelection(false)
     , m_highlightedWindow(NULL)
     , m_filterFrame(NULL)
     , m_closeView(NULL)
@@ -70,15 +72,8 @@ PresentWindowsEffect::PresentWindowsEffect()
     , m_highlightedDropTarget(NULL)
     , m_dragToClose(false)
 {
-    m_atomDesktop = XInternAtom(display(), "_KDE_PRESENT_WINDOWS_DESKTOP", False);
-    m_atomWindows = XInternAtom(display(), "_KDE_PRESENT_WINDOWS_GROUP", False);
-    effects->registerPropertyType(m_atomDesktop, true);
-    effects->registerPropertyType(m_atomWindows, true);
-
-    // Announce support by creating a dummy version on the root window
-    unsigned char dummy = 0;
-    XChangeProperty(display(), rootWindow(), m_atomDesktop, m_atomDesktop, 8, PropModeReplace, &dummy, 1);
-    XChangeProperty(display(), rootWindow(), m_atomWindows, m_atomWindows, 8, PropModeReplace, &dummy, 1);
+    m_atomDesktop = effects->announceSupportProperty("_KDE_PRESENT_WINDOWS_DESKTOP", this);
+    m_atomWindows = effects->announceSupportProperty("_KDE_PRESENT_WINDOWS_GROUP", this);
 
     KActionCollection* actionCollection = new KActionCollection(this);
     KAction* a = (KAction*)actionCollection->addAction("Expose");
@@ -111,16 +106,6 @@ PresentWindowsEffect::PresentWindowsEffect()
 
 PresentWindowsEffect::~PresentWindowsEffect()
 {
-    XDeleteProperty(display(), rootWindow(), m_atomDesktop);
-    effects->registerPropertyType(m_atomDesktop, false);
-    XDeleteProperty(display(), rootWindow(), m_atomWindows);
-    effects->registerPropertyType(m_atomWindows, false);
-    foreach (ElectricBorder border, m_borderActivate) {
-        effects->unreserveElectricBorder(border);
-    }
-    foreach (ElectricBorder border, m_borderActivateAll) {
-        effects->unreserveElectricBorder(border);
-    }
     delete m_filterFrame;
     delete m_closeView;
 }
@@ -129,24 +114,24 @@ void PresentWindowsEffect::reconfigure(ReconfigureFlags)
 {
     PresentWindowsConfig::self()->readConfig();
     foreach (ElectricBorder border, m_borderActivate) {
-        effects->unreserveElectricBorder(border);
+        effects->unreserveElectricBorder(border, this);
     }
     foreach (ElectricBorder border, m_borderActivateAll) {
-        effects->unreserveElectricBorder(border);
+        effects->unreserveElectricBorder(border, this);
     }
     m_borderActivate.clear();
     m_borderActivateAll.clear();
     foreach (int i, PresentWindowsConfig::borderActivate()) {
         m_borderActivate.append(ElectricBorder(i));
-        effects->reserveElectricBorder(ElectricBorder(i));
+        effects->reserveElectricBorder(ElectricBorder(i), this);
     }
     foreach (int i, PresentWindowsConfig::borderActivateAll()) {
         m_borderActivateAll.append(ElectricBorder(i));
-        effects->reserveElectricBorder(ElectricBorder(i));
+        effects->reserveElectricBorder(ElectricBorder(i), this);
     }
     foreach (int i, PresentWindowsConfig::borderActivateClass()) {
         m_borderActivateClass.append(ElectricBorder(i));
-        effects->reserveElectricBorder(ElectricBorder(i));
+        effects->reserveElectricBorder(ElectricBorder(i), this);
     }
     m_layoutMode = PresentWindowsConfig::layoutMode();
     m_showCaptions = PresentWindowsConfig::drawWindowCaptions();
@@ -237,6 +222,10 @@ void PresentWindowsEffect::postPaintScreen()
         }
         effects->setActiveFullScreenEffect(NULL);
         effects->addRepaintFull();
+    } else if (m_activated && m_needInitialSelection) {
+        m_needInitialSelection = false;
+        QMouseEvent me(QEvent::MouseMove, cursorPos(), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        windowInputMouseEvent(&me);
     }
 
     // Update windows that are changing brightness or opacity
@@ -346,12 +335,19 @@ void PresentWindowsEffect::paintWindow(EffectWindow *w, int mask, QRegion region
             m_motionManager.apply(w, data);
             QRect rect = m_motionManager.transformedGeometry(w).toRect();
 
-            if (m_activated && winData->highlight > 0.0 && !m_motionManager.areWindowsMoving()) {
+            if (m_activated && winData->highlight > 0.0) {
                 // scale the window (interpolated by the highlight level) to at least 105% or to cover 1/16 of the screen size - yet keep it in screen bounds
                 QRect area = effects->clientArea(FullScreenArea, w);
 
                 QSizeF effSize(w->width()*data.xScale(), w->height()*data.yScale());
-                float tScale = sqrt((area.width()*area.height()) / (16.0*effSize.width()*effSize.height()));
+                const float xr = area.width()/effSize.width();
+                const float yr = area.height()/effSize.height();
+                float tScale = 0.0;
+                if (xr < yr) {
+                    tScale = qMax(xr/4.0, yr/32.0);
+                } else {
+                    tScale = qMax(xr/32.0, yr/4.0);
+                }
                 if (tScale < 1.05) {
                     tScale = 1.05;
                 }
@@ -530,11 +526,8 @@ bool PresentWindowsEffect::borderActivated(ElectricBorder border)
     return true;
 }
 
-void PresentWindowsEffect::windowInputMouseEvent(Window w, QEvent *e)
+void PresentWindowsEffect::windowInputMouseEvent(QEvent *e)
 {
-    assert(w == m_input);
-    Q_UNUSED(w);
-
     QMouseEvent* me = static_cast< QMouseEvent* >(e);
     if (m_closeView && m_closeView->geometry().contains(me->pos())) {
         if (!m_closeView->isVisible()) {
@@ -552,6 +545,7 @@ void PresentWindowsEffect::windowInputMouseEvent(Window w, QEvent *e)
     // We cannot use m_motionManager.windowAtPoint() as the window might not be visible
     EffectWindowList windows = m_motionManager.managedWindows();
     bool hovering = false;
+    EffectWindow *highlightCandidate = NULL;
     for (int i = 0; i < windows.size(); ++i) {
         DataHash::const_iterator winData = m_windowData.constFind(windows.at(i));
         if (winData == m_windowData.constEnd())
@@ -560,7 +554,7 @@ void PresentWindowsEffect::windowInputMouseEvent(Window w, QEvent *e)
                 winData->visible && !winData->deleted) {
             hovering = true;
             if (windows.at(i) && m_highlightedWindow != windows.at(i) && !m_dragInProgress)
-                setHighlightedWindow(windows.at(i));
+                highlightCandidate = windows.at(i);
             break;
         }
     }
@@ -572,6 +566,8 @@ void PresentWindowsEffect::windowInputMouseEvent(Window w, QEvent *e)
         m_closeView->hide();
 
     if (e->type() == QEvent::MouseButtonRelease) {
+        if (highlightCandidate)
+            setHighlightedWindow(highlightCandidate);
         if (me->button() == Qt::LeftButton) {
             if (m_dragInProgress && m_dragWindow) {
                 // handle drop
@@ -590,7 +586,7 @@ void PresentWindowsEffect::windowInputMouseEvent(Window w, QEvent *e)
                     m_highlightedDropTarget = NULL;
                 }
                 effects->addRepaintFull();
-                XDefineCursor(display(), m_input, QCursor(Qt::PointingHandCursor).handle());
+                effects->defineCursor(Qt::PointingHandCursor);
                 return;
             }
             if (hovering) {
@@ -629,19 +625,22 @@ void PresentWindowsEffect::windowInputMouseEvent(Window w, QEvent *e)
             m_highlightedDropTarget->setIcon(icon.pixmap(QSize(128, 128), QIcon::Normal));
             m_highlightedDropTarget = NULL;
         }
-        XDefineCursor(display(), m_input, QCursor(Qt::PointingHandCursor).handle());
+        effects->defineCursor(Qt::PointingHandCursor);
     } else if (e->type() == QEvent::MouseButtonPress && me->button() == Qt::LeftButton && hovering && m_dragToClose) {
+        if (highlightCandidate)
+            setHighlightedWindow(highlightCandidate);
         m_dragStart = me->pos();
         m_dragWindow = m_highlightedWindow;
         m_dragInProgress = false;
         m_highlightedDropTarget = NULL;
         effects->setElevatedWindow(m_dragWindow, true);
         effects->addRepaintFull();
-    }
+    } else if (highlightCandidate && !m_motionManager.areWindowsMoving())
+        setHighlightedWindow(highlightCandidate);
     if (e->type() == QEvent::MouseMove && m_dragWindow) {
         if ((me->pos() - m_dragStart).manhattanLength() > KGlobalSettings::dndEventDelay() && !m_dragInProgress) {
             m_dragInProgress = true;
-            XDefineCursor(display(), m_input, QCursor(Qt::ForbiddenCursor).handle());
+            effects->defineCursor(Qt::ForbiddenCursor);
         }
         if (!m_dragInProgress) {
             return;
@@ -659,13 +658,13 @@ void PresentWindowsEffect::windowInputMouseEvent(Window w, QEvent *e)
             KIcon icon("user-trash");
             effects->addRepaint(m_highlightedDropTarget->geometry());
             m_highlightedDropTarget->setIcon(icon.pixmap(QSize(128, 128), QIcon::Active));
-            XDefineCursor(display(), m_input, QCursor(Qt::DragMoveCursor).handle());
+            effects->defineCursor(Qt::DragMoveCursor);
         } else if (!target && m_highlightedDropTarget) {
             KIcon icon("user-trash");
             effects->addRepaint(m_highlightedDropTarget->geometry());
             m_highlightedDropTarget->setIcon(icon.pixmap(QSize(128, 128), QIcon::Normal));
             m_highlightedDropTarget = NULL;
-            XDefineCursor(display(), m_input, QCursor(Qt::ForbiddenCursor).handle());
+            effects->defineCursor(Qt::ForbiddenCursor);
         }
     }
 }
@@ -699,11 +698,6 @@ void PresentWindowsEffect::mouseActionWindow(WindowMouseAction& action)
                 m_highlightedWindow->unminimize();
             else
                 m_highlightedWindow->minimize();
-        }
-        break;
-    case WindowCloseAction:
-        if (m_highlightedWindow) {
-            m_highlightedWindow->closeWindow();
         }
         break;
     default:
@@ -1495,6 +1489,7 @@ void PresentWindowsEffect::setActive(bool active)
         return;
     m_activated = active;
     if (m_activated) {
+        m_needInitialSelection = true;
         m_closeButtonCorner = (Qt::Corner)effects->kwinOption(KWin::CloseButtonCorner).toInt();
         m_decalOpacity = 0.0;
         m_highlightedWindow = NULL;
@@ -1554,7 +1549,7 @@ void PresentWindowsEffect::setActive(bool active)
         }
 
         // Create temporary input window to catch mouse events
-        m_input = effects->createFullScreenInputWindow(this, Qt::PointingHandCursor);
+        effects->startMouseInterception(this, Qt::PointingHandCursor);
         m_hasKeyboardGrab = effects->grabKeyboard(this);
         effects->setActiveFullScreenEffect(this);
 
@@ -1569,6 +1564,7 @@ void PresentWindowsEffect::setActive(bool active)
             }
         }
     } else {
+        m_needInitialSelection = false;
         if (m_highlightedWindow)
             effects->setElevatedWindow(m_highlightedWindow, false);
         // Fade in/out all windows
@@ -1597,7 +1593,7 @@ void PresentWindowsEffect::setActive(bool active)
         m_windowFilter.clear();
         m_selectedWindows.clear();
 
-        effects->destroyInputWindow(m_input);
+        effects->stopMouseInterception(this);
         if (m_hasKeyboardGrab)
             effects->ungrabKeyboard();
         m_hasKeyboardGrab = false;
@@ -1962,64 +1958,39 @@ void PresentWindowsEffect::screenCountChanged()
 /************************************************
 * CloseWindowView
 ************************************************/
-CloseWindowView::CloseWindowView(QWidget* parent)
-    : QGraphicsView(parent)
+CloseWindowView::CloseWindowView(QWidget *parent)
+    : QDeclarativeView(parent)
     , m_armTimer(new QTimer(this))
 {
     setWindowFlags(Qt::X11BypassWindowManagerHint);
     setAttribute(Qt::WA_TranslucentBackground);
-    setFrameShape(QFrame::NoFrame);
     QPalette pal = palette();
     pal.setColor(backgroundRole(), Qt::transparent);
     setPalette(pal);
-    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-
-    // setup the scene
-    QGraphicsScene* scene = new QGraphicsScene(this);
-    m_closeButton = new Plasma::PushButton();
-    m_closeButton->setIcon(KIcon("window-close"));
-    scene->addItem(m_closeButton);
-    connect(m_closeButton, SIGNAL(clicked()), SIGNAL(close()));
-
-    QGraphicsLinearLayout *layout = new QGraphicsLinearLayout;
-    layout->addItem(m_closeButton);
-
-    QGraphicsWidget *form = new QGraphicsWidget;
-    form->setLayout(layout);
-    form->setGeometry(0, 0, 32, 32);
-    scene->addItem(form);
-
-    m_frame = new Plasma::FrameSvg(this);
-    if (Plasma::Theme::defaultTheme()->currentThemeHasImage("translucent/dialogs/background")) {
-        m_frame->setImagePath("translucent/dialogs/background");
-    } else {
-        m_frame->setImagePath("dialogs/background");
+    foreach (const QString &importPath, KGlobal::dirs()->findDirs("module", "imports")) {
+        engine()->addImportPath(importPath);
     }
-    m_frame->setCacheAllRenderedFrames(true);
-    m_frame->setEnabledBorders(Plasma::FrameSvg::AllBorders);
-    qreal left, top, right, bottom;
-    m_frame->getMargins(left, top, right, bottom);
-    qreal width = form->size().width() + left + right;
-    qreal height = form->size().height() + top + bottom;
-    m_frame->resizeFrame(QSizeF(width, height));
-    Plasma::WindowEffects::enableBlurBehind(winId(), true, m_frame->mask());
-    form->setPos(left, top);
-    scene->setSceneRect(QRectF(QPointF(0, 0), QSizeF(width, height)));
-    setScene(scene);
+    KDeclarative kdeclarative;
+    kdeclarative.setDeclarativeEngine(engine());
+    kdeclarative.initialize();
+    kdeclarative.setupBindings();
+
+    setSource(QUrl(KStandardDirs::locate("data", QLatin1String("kwin/effects/presentwindows/main.qml"))));
+    if (QObject *item = rootObject()->findChild<QObject*>("closeButton")) {
+        connect(item, SIGNAL(clicked()), SIGNAL(close()));
+    }
 
     // setup the timer - attempt to prevent accidental clicks
     m_armTimer->setSingleShot(true);
     m_armTimer->setInterval(350); // 50ms until the window is elevated (seen!) and 300ms more to be "realized" by the user.
-    connect(m_armTimer, SIGNAL(timeout()), SLOT(arm()));
 }
 
-void CloseWindowView::windowInputMouseEvent(QMouseEvent* e)
+void CloseWindowView::windowInputMouseEvent(QMouseEvent *e)
 {
-    if (!isEnabled())
-        return;
     if (e->type() == QEvent::MouseMove) {
         mouseMoveEvent(e);
+    } else if (m_armTimer->isActive()) {
+        return;
     } else if (e->type() == QEvent::MouseButtonPress) {
         mousePressEvent(e);
     } else if (e->type() == QEvent::MouseButtonDblClick) {
@@ -2029,24 +2000,18 @@ void CloseWindowView::windowInputMouseEvent(QMouseEvent* e)
     }
 }
 
-void CloseWindowView::drawBackground(QPainter* painter, const QRectF& rect)
-{
-    Q_UNUSED(rect)
-    painter->setRenderHint(QPainter::Antialiasing);
-    m_frame->paintFrame(painter);
-}
-
-void CloseWindowView::arm()
-{
-    setEnabled(true);
-}
-
 void CloseWindowView::disarm()
 {
-    setEnabled(false);
     m_armTimer->start();
 }
 
+void CloseWindowView::hideEvent(QHideEvent *event)
+{
+    const QPoint globalPos = mapToGlobal(QPoint(-1,-1));
+    QMouseEvent me(QEvent::MouseMove, QPoint(-1,-1), globalPos, Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+    mouseMoveEvent(&me);
+    QDeclarativeView::hideEvent(event);
+}
 
 } // namespace
 

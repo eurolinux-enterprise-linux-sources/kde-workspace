@@ -30,8 +30,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "workspace.h"
 #include "client.h"
-#include <QDBusInterface>
-#include <QDBusPendingCall>
 #include <QSocketNotifier>
 #include <QSessionManager>
 #include <kdebug.h>
@@ -104,7 +102,7 @@ void Workspace::storeSession(KConfig* config, SMSavePhase phase)
         // but both Qt and KDE treat phase1 and phase2 separately,
         // which results in different sessionkey and different config file :(
         session_active_client = active_client;
-        session_desktop = currentDesktop();
+        session_desktop = VirtualDesktopManager::self()->current();
     } else if (phase == SMSavePhase2) {
         cg.writeEntry("count", count);
         cg.writeEntry("active", session_active_client);
@@ -112,7 +110,7 @@ void Workspace::storeSession(KConfig* config, SMSavePhase phase)
     } else { // SMSavePhase2Full
         cg.writeEntry("count", count);
         cg.writeEntry("active", session_active_client);
-        cg.writeEntry("desktop", currentDesktop());
+        cg.writeEntry("desktop", VirtualDesktopManager::self()->current());
     }
 }
 
@@ -123,7 +121,6 @@ void Workspace::storeClient(KConfigGroup &cg, int num, Client *c)
     cg.writeEntry(QString("sessionId") + n, c->sessionId().constData());
     cg.writeEntry(QString("windowRole") + n, c->windowRole().constData());
     cg.writeEntry(QString("wmCommand") + n, c->wmCommand().constData());
-    cg.writeEntry(QString("wmClientMachine") + n, c->wmClientMachine(true).constData());
     cg.writeEntry(QString("resourceName") + n, c->resourceName().constData());
     cg.writeEntry(QString("resourceClass") + n, c->resourceClass().constData());
     cg.writeEntry(QString("geometry") + n, QRect(c->calculateGravitation(true), c->clientSize()));   // FRAME
@@ -184,81 +181,6 @@ void Workspace::storeSubSession(const QString &name, QSet<QByteArray> sessionIds
     //cg.writeEntry( "desktop", currentDesktop());
 }
 
-bool Workspace::stopActivity(const QString &id)
-{
-    if (sessionSaving()) {
-        return false; //ksmserver doesn't queue requests (yet)
-        //FIXME what about session *loading*?
-    }
-
-    //ugly hack to avoid dbus deadlocks
-#ifdef KWIN_BUILD_ACTIVITIES
-    updateActivityList(true, false);
-#endif
-    QMetaObject::invokeMethod(this, "reallyStopActivity", Qt::QueuedConnection, Q_ARG(QString, id));
-    //then lie and assume it worked.
-    return true;
-}
-
-void Workspace::reallyStopActivity(const QString &id)
-{
-    if (sessionSaving())
-        return; //ksmserver doesn't queue requests (yet)
-
-    kDebug() << id;
-
-    QSet<QByteArray> saveSessionIds;
-    QSet<QByteArray> dontCloseSessionIds;
-    for (ClientList::const_iterator it = clients.constBegin(); it != clients.constEnd(); ++it) {
-        const Client* c = (*it);
-        const QByteArray sessionId = c->sessionId();
-        if (sessionId.isEmpty()) {
-            continue; //TODO support old wm_command apps too?
-        }
-
-        //kDebug() << sessionId;
-
-        //if it's on the activity that's closing, it needs saving
-        //but if a process is on some other open activity, I don't wanna close it yet
-        //this is, of course, complicated by a process having many windows.
-        if (c->isOnAllActivities()) {
-            dontCloseSessionIds << sessionId;
-            continue;
-        }
-
-        const QStringList activities = c->activities();
-        foreach (const QString & activityId, activities) {
-            if (activityId == id) {
-                saveSessionIds << sessionId;
-            } else if (openActivities_.contains(activityId)) {
-                dontCloseSessionIds << sessionId;
-            }
-        }
-    }
-
-    storeSubSession(id, saveSessionIds);
-
-    QStringList saveAndClose;
-    QStringList saveOnly;
-    foreach (const QByteArray & sessionId, saveSessionIds) {
-        if (dontCloseSessionIds.contains(sessionId)) {
-            saveOnly << sessionId;
-        } else {
-            saveAndClose << sessionId;
-        }
-    }
-
-    kDebug() << "saveActivity" << id << saveAndClose << saveOnly;
-
-    //pass off to ksmserver
-    QDBusInterface ksmserver("org.kde.ksmserver", "/KSMServer", "org.kde.KSMServerInterface");
-    if (ksmserver.isValid()) {
-        ksmserver.asyncCall("saveSubSession", id, saveAndClose, saveOnly);
-    } else {
-        kDebug() << "couldn't get ksmserver interface";
-    }
-}
-
 /*!
   Loads the session information from the config file.
 
@@ -283,7 +205,6 @@ void Workspace::addSessionInfo(KConfigGroup &cg)
         info->sessionId = cg.readEntry(QString("sessionId") + n, QString()).toLatin1();
         info->windowRole = cg.readEntry(QString("windowRole") + n, QString()).toLatin1();
         info->wmCommand = cg.readEntry(QString("wmCommand") + n, QString()).toLatin1();
-        info->wmClientMachine = cg.readEntry(QString("wmClientMachine") + n, QString()).toLatin1();
         info->resourceName = cg.readEntry(QString("resourceName") + n, QString()).toLatin1();
         info->resourceClass = cg.readEntry(QString("resourceClass") + n, QString()).toLower().toLatin1();
         info->geometry = cg.readEntry(QString("geometry") + n, QRect());
@@ -318,28 +239,6 @@ void Workspace::loadSubSessionInfo(const QString &name)
     addSessionInfo(cg);
 }
 
-bool Workspace::startActivity(const QString &id)
-{
-    if (sessionSaving()) {
-        return false; //ksmserver doesn't queue requests (yet)
-    }
-
-    if (!allActivities_.contains(id)) {
-        return false; //bogus id
-    }
-
-    loadSubSessionInfo(id);
-
-    QDBusInterface ksmserver("org.kde.ksmserver", "/KSMServer", "org.kde.KSMServerInterface");
-    if (ksmserver.isValid()) {
-        ksmserver.asyncCall("restoreSubSession", id);
-    } else {
-        kDebug() << "couldn't get ksmserver interface";
-        return false;
-    }
-    return true;
-}
-
 /*!
   Returns a SessionInfo for client \a c. The returned session
   info is removed from the storage. It's up to the caller to delete it.
@@ -355,7 +254,6 @@ SessionInfo* Workspace::takeSessionInfo(Client* c)
     QByteArray sessionId = c->sessionId();
     QByteArray windowRole = c->windowRole();
     QByteArray wmCommand = c->wmCommand();
-    QByteArray wmClientMachine = c->wmClientMachine(true);
     QByteArray resourceName = c->resourceName();
     QByteArray resourceClass = c->resourceClass();
 
@@ -388,7 +286,6 @@ SessionInfo* Workspace::takeSessionInfo(Client* c)
                 break;
             if (info->resourceName == resourceName
                     && info->resourceClass == resourceClass
-                    && info->wmClientMachine == wmClientMachine
                     && sessionInfoWindowTypeMatch(c, info)) {
                 if (wmCommand.isEmpty() || info->wmCommand == wmCommand) {
                     realInfo = info;
@@ -468,7 +365,7 @@ static void save_yourself(SmcConn conn_P, SmPointer ptr, int, Bool shutdown, int
     if (conn_P != session->connection())
         return;
     if (shutdown)
-        Workspace::self()->disableRulesUpdates(true);
+        RuleBook::self()->setUpdatesDisabled(true);
     SmcSaveYourselfDone(conn_P, True);
 }
 
@@ -494,7 +391,7 @@ static void shutdown_cancelled(SmcConn conn_P, SmPointer ptr)
     SessionSaveDoneHelper* session = reinterpret_cast< SessionSaveDoneHelper* >(ptr);
     if (conn_P != session->connection())
         return;
-    Workspace::self()->disableRulesUpdates(false);   // re-enable
+    RuleBook::self()->setUpdatesDisabled(false);   // re-enable
     // no need to differentiate between successful finish and cancel
     session->saveDone();
 }

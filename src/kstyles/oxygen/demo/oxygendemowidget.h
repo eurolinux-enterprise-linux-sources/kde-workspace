@@ -6,7 +6,7 @@
 // base class for oxygen demo widgets
 // -------------------
 //
-// Copyright (c) 2010 Hugo Pereira Da Costa <hugo@oxygen-icons.org>
+// Copyright (c) 2010 Hugo Pereira Da Costa <hugo.pereira@free.fr>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
@@ -42,7 +42,7 @@ namespace Oxygen
         public:
 
         //! constructo
-        DemoWidget( QWidget* parent ):
+        explicit DemoWidget( QWidget* parent ):
             QWidget( parent ),
             _simulator( new Simulator( this ) )
         {}

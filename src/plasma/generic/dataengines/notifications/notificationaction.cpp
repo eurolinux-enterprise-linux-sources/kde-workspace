@@ -25,6 +25,7 @@ void NotificationAction::start()
 {
     //kDebug() << "Trying to perform the action " << operationName() << " on " << destination();
     //kDebug() << "actionId: " << parameters()["actionId"].toString();
+    //kDebug() << "params: " << parameters();
 
     if (!m_engine) {
         setErrorText(i18n("The notification dataEngine is not set."));
@@ -49,13 +50,20 @@ void NotificationAction::start()
         //kDebug() << "invoking action on " << id;
         emit m_engine->ActionInvoked(id, parameters()["actionId"].toString());
     } else if (operationName() == "userClosed") {
-        m_engine->userClosedNotification(id);
+        //userClosedNotification deletes the job, so we have to invoke it queued, in this case emitResult() can be called
+        m_engine->metaObject()->invokeMethod(m_engine, "userClosedNotification", Qt::QueuedConnection, Q_ARG(uint, id));
     } else if (operationName() == "createNotification") {
-        m_engine->createNotification(parameters().value("appName").toString(),
-                            parameters().value("appIcon").toString(),
-                            parameters().value("summary").toString(),
-                            parameters().value("body").toString(),
-                            parameters().value("timeout").toInt());
+        int rv = m_engine->createNotification(parameters().value("appName").toString(),
+                                              parameters().value("appIcon").toString(),
+                                              parameters().value("summary").toString(),
+                                              parameters().value("body").toString(),
+                                              parameters().value("timeout").toInt(),
+                                              false,
+                                              QString()
+                                             );
+        setResult(rv);
+    } else if (operationName() == "configureNotification") {
+        m_engine->configureNotification(parameters()["appRealName"].toString());
     }
 
     emitResult();

@@ -36,7 +36,7 @@
 QHash<QString, QString> XCursorTheme::alternatives;
 
 XCursorTheme::XCursorTheme(const QDir &themeDir)
-    : LegacyTheme(themeDir.dirName())
+    : CursorTheme(themeDir.dirName())
 {
     // Directory information
     setName(themeDir.dirName());
@@ -115,8 +115,8 @@ QString XCursorTheme::findAlternative(const QString &name) const
         // Note that the MD5 hash for left_ptr_watch is for the KDE version of that cursor.
         alternatives.insert("size_ver",       "00008160000006810000408080010102");
         alternatives.insert("size_hor",       "028006030e0e7ebffc7f7070c0600140");
-        alternatives.insert("size_bdiag",     "c7088f0f3e6c8088236ef8e1e3e70000");
-        alternatives.insert("size_fdiag",     "fcf1c3c7cd4491d801f1e1c78f100000");
+        alternatives.insert("size_bdiag",     "fcf1c3c7cd4491d801f1e1c78f100000");
+        alternatives.insert("size_fdiag",     "c7088f0f3e6c8088236ef8e1e3e70000");
         alternatives.insert("whats_this",     "d9ce0ab605698f320427677b458ad60b");
         alternatives.insert("split_h",        "14fef782d02440884392942c11205230");
         alternatives.insert("split_v",        "2870a09082c103050810ffdffffe0204");
@@ -191,9 +191,8 @@ QCursor XCursorTheme::loadCursor(const QString &name, int size) const
     if (!images)
         images = xcLoadImages(findAlternative(name), size);
 
-    // Fall back to a legacy cursor
     if (!images)
-        return LegacyTheme::loadCursor(name);
+        return QCursor();
 
     // Create the cursor
     Cursor handle = XcursorImagesLoadCursor(QX11Info::display(), images);
@@ -216,9 +215,9 @@ QImage XCursorTheme::loadImage(const QString &name, int size) const
     if (!xcimage)
         xcimage = xcLoadImage(findAlternative(name), size);
 
-    // Fall back to a legacy cursor
-    if (!xcimage)
-        return LegacyTheme::loadImage(name);
+    if (!xcimage) {
+        return QImage();
+    }
 
     // Convert the XcursorImage to a QImage, and auto-crop it
     QImage image((uchar *)xcimage->pixels, xcimage->width, xcimage->height,
