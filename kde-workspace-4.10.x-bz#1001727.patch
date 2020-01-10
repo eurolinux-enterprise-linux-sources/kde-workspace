@@ -1,0 +1,66 @@
+diff --git a/kcontrol/dateandtime/helper.h b/kcontrol/dateandtime/helper.h
+index 1cbf103..7a20496 100644
+--- a/kcontrol/dateandtime/helper.h
++++ b/kcontrol/dateandtime/helper.h
+@@ -47,6 +47,8 @@ class ClockHelper : public QObject
+         int date(const QString& newdate, const QString& olddate);
+         int tz(const QString& selectedzone);
+         int tzreset();
++
++        void toHwclock();
+ };
+ 
+ #endif // CLOCK_HELPER_H
+-- 
+1.8.3.1
+
+From 80f2c60ba59db71d4fc40170cdc561f9136690cc Mon Sep 17 00:00:00 2001
+From: Martin Briza <mbriza@redhat.com>
+Date: Mon, 7 Oct 2013 14:53:00 +0200
+Subject: [PATCH] kcontrol/dateandtime: Propagate NTP clock to hwclock, too
+
+---
+ kcontrol/dateandtime/helper.cpp | 15 +++++++++++----
+ kcontrol/dateandtime/helper.h   |  2 ++
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/kcontrol/dateandtime/helper.cpp b/kcontrol/dateandtime/helper.cpp
+index 9168db3..d2473a5 100644
+--- a/kcontrol/dateandtime/helper.cpp
++++ b/kcontrol/dateandtime/helper.cpp
+@@ -82,6 +82,8 @@ int ClockHelper::ntp( const QStringList& ntpServers, bool ntpEnabled,
+     proc << ntpUtility << timeServer;
+     if ( proc.execute() != 0 ) {
+       ret |= NTPError;
++    } else {
++      toHwclock();
+     }
+   } else if( ntpEnabled ) {
+     ret |= NTPError;
+@@ -100,10 +102,7 @@ int ClockHelper::date( const QString& newdate, const QString& olddate )
+         return DateError;
+     }
+ 
+-    QString hwclock = KStandardDirs::findExe("hwclock", exePath);
+-    if (!hwclock.isEmpty()) {
+-        KProcess::execute(hwclock, QStringList() << "--systohc");
+-    }
++    toHwclock();
+     return 0;
+ }
+ 
+@@ -215,6 +214,14 @@ int ClockHelper::tzreset()
+     return 0;
+ }
+ 
++void ClockHelper::toHwclock()
++{
++  QString hwclock = KStandardDirs::findExe("hwclock", exePath);
++  if (!hwclock.isEmpty()) {
++    KProcess::execute(hwclock, QStringList() << "--systohc");
++  }
++}
++
+ ActionReply ClockHelper::save(const QVariantMap &args)
+ {
+   bool _ntp = args.value("ntp").toBool();

@@ -1,0 +1,11 @@
+--- kde-workspace-4.10.4/plasma/generic/runners/sessions/sessionrunner.cpp.vtnumbers	2013-06-12 14:31:05.631265540 +0200
++++ kde-workspace-4.10.4/plasma/generic/runners/sessions/sessionrunner.cpp	2013-06-12 14:31:10.600251465 +0200
+@@ -256,7 +256,7 @@
+                 "Ctrl, Alt and the appropriate F-key at the same time. "
+                 "Additionally, the KDE Panel and Desktop menus have "
+                 "actions for switching between sessions.</p>",
+-                7, 8),
++                1, 2),
+             i18n("Warning - New Session"),
+             KGuiItem(i18n("&Start New Session"), "fork"),
+             KStandardGuiItem::cancel(),

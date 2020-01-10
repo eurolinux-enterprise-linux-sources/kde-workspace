@@ -1,0 +1,51 @@
+diff -up kde-workspace-4.10.5/CMakeLists.txt.than kde-workspace-4.10.5/CMakeLists.txt
+--- kde-workspace-4.10.5/CMakeLists.txt.than	2014-02-27 12:11:28.649545493 +0100
++++ kde-workspace-4.10.5/CMakeLists.txt	2014-02-27 12:22:15.503547119 +0100
+@@ -176,11 +176,6 @@ if(${KDE_PLATFORM_PROFILE} STREQUAL "Des
+       macro_optional_add_subdirectory(appmenu)
+    endif(NOT WIN32)
+ 
+-   if(X11_Xau_FOUND AND X11_Xdmcp_FOUND)
+-      macro_optional_add_subdirectory( kdm )
+-   else(X11_Xau_FOUND AND X11_Xdmcp_FOUND)
+-      message(STATUS "Xau lib or Xdmcp lib was missing. kdm will not compile")
+-   endif(X11_Xau_FOUND AND X11_Xdmcp_FOUND)
+ endif(${KDE_PLATFORM_PROFILE} STREQUAL "Desktop")
+ 
+ if(NOT WIN32)
+diff -up kde-workspace-4.10.5/doc/CMakeLists.txt.than kde-workspace-4.10.5/doc/CMakeLists.txt
+--- kde-workspace-4.10.5/doc/CMakeLists.txt.than	2014-02-27 12:22:56.089547221 +0100
++++ kde-workspace-4.10.5/doc/CMakeLists.txt	2014-02-27 12:23:05.400547245 +0100
+@@ -1,4 +1,3 @@
+-add_subdirectory(kdm)
+ add_subdirectory(klipper)
+ add_subdirectory(kfontview)
+ add_subdirectory(kmenuedit)
+diff -up kde-workspace-4.10.5/kdm/kfrontend/sessions/kde-plasma.desktop.cmake.than kde-workspace-4.10.5/kdm/kfrontend/sessions/kde-plasma.desktop.cmake
+--- kde-workspace-4.10.5/kdm/kfrontend/sessions/kde-plasma.desktop.cmake.than	2014-02-28 14:37:00.969067779 +0100
++++ kde-workspace-4.10.5/kdm/kfrontend/sessions/kde-plasma.desktop.cmake	2014-02-28 14:37:46.899068843 +0100
+@@ -1,8 +1,8 @@
+ [Desktop Entry]
+ Encoding=UTF-8
+ Type=XSession
+-Exec=${BIN_INSTALL_DIR}/startkde
+-TryExec=${BIN_INSTALL_DIR}/startkde
++Exec=/usr/bin/startkde
++TryExec=/usr/bin/startkde
+ Name=KDE Plasma Workspace
+ Name[ar]=مساحة عمل بلازما كدي
+ Name[bg]=Работно пространство Plasma на KDE
+diff -up kde-workspace-4.10.5/kdm/kfrontend/sessions/kde-plasma-safe.desktop.cmake.than kde-workspace-4.10.5/kdm/kfrontend/sessions/kde-plasma-safe.desktop.cmake
+--- kde-workspace-4.10.5/kdm/kfrontend/sessions/kde-plasma-safe.desktop.cmake.than	2014-02-28 14:40:48.322073046 +0100
++++ kde-workspace-4.10.5/kdm/kfrontend/sessions/kde-plasma-safe.desktop.cmake	2014-02-28 14:38:09.762069373 +0100
+@@ -1,8 +1,8 @@
+ [Desktop Entry]
+ Encoding=UTF-8
+ Type=XSession
+-Exec=${BIN_INSTALL_DIR}/startkde --failsafe
+-TryExec=${BIN_INSTALL_DIR}/startkde
++Exec=/usr/bin/startkde --failsafe
++TryExec=/usr/bin/startkde
+ Name=KDE Plasma Workspace (failsafe session)
+ Name[ar]=مساحة عمل بلازما كدي (الجلسة الآمنة)
+ Name[bn]=কে.ডি.ই. প্লাসমা ওয়ার্কস্পেস (failsafe session)

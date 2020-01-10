@@ -1,0 +1,34 @@
+diff --git a/kcontrol/desktoptheme/desktopthemedetails.cpp b/kcontrol/desktoptheme/desktopthemedetails.cpp
+index 295edd9..ce01680 100644
+--- a/kcontrol/desktoptheme/desktopthemedetails.cpp
++++ b/kcontrol/desktoptheme/desktopthemedetails.cpp
+@@ -287,9 +287,10 @@ void DesktopThemeDetails::exportTheme()
+             if (!expFileName.isEmpty()) {
+                 KUrl path(themePath);
+                 KZip expFile(expFileName);
+-                expFile.open(QIODevice::WriteOnly);
+-                expFile.addLocalDirectory(path.directory (), themeStoragePath);
+-                expFile.close();
++                if (expFile.open(QIODevice::WriteOnly)) {
++                    expFile.addLocalDirectory(path.directory (), themeStoragePath);
++                    expFile.close();
++                }
+             }
+         }
+     }
+diff --git a/ksysguard/gui/Workspace.cpp b/ksysguard/gui/Workspace.cpp
+index 6e9a261..668c48a 100644
+--- a/ksysguard/gui/Workspace.cpp
++++ b/ksysguard/gui/Workspace.cpp
+@@ -198,7 +198,9 @@ void Workspace::importWorkSheet( const KUrl &url )
+    * transparent. Unless s/o beats me up I use this pseudo transparent
+    * code. */
+   QString tmpFile;
+-  KIO::NetAccess::download( url, tmpFile, this );
++  if (!KIO::NetAccess::download( url, tmpFile, this )) {
++    return;
++  }
+ 
+   // Import sheet from file.
+   if ( !restoreWorkSheet( tmpFile ) )
+ 

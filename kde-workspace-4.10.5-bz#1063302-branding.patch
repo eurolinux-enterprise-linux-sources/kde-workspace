@@ -1,0 +1,33 @@
+diff -up kde-workspace-4.10.5/plasma/desktop/applets/kickoff/applet/applet.cpp.than kde-workspace-4.10.5/plasma/desktop/applets/kickoff/applet/applet.cpp
+--- kde-workspace-4.10.5/plasma/desktop/applets/kickoff/applet/applet.cpp.than	2014-02-18 20:48:13.688843863 +0100
++++ kde-workspace-4.10.5/plasma/desktop/applets/kickoff/applet/applet.cpp	2014-02-18 20:49:46.920845262 +0100
+@@ -191,7 +191,7 @@ void LauncherApplet::toolTipAboutToShow(
+ void LauncherApplet::configChanged()
+ {
+     KConfigGroup cg = config();
+-    setPopupIcon(cg.readEntry("icon", "start-here-kde"));
++    setPopupIcon(cg.readEntry("icon", "system-logo-icon"));
+     constraintsEvent(Plasma::ImmutableConstraint);
+ 
+     if (d->launcher) {
+@@ -210,7 +210,7 @@ void LauncherApplet::configAccepted()
+     d->createLauncher();
+ 
+     KConfigGroup cg = config();
+-    const QString oldIcon = cg.readEntry("icon", "start-here-kde");
++    const QString oldIcon = cg.readEntry("icon", "system-logo-icon");
+     if (!iconname.isEmpty() && iconname != oldIcon) {
+         cg.writeEntry("icon", iconname);
+ 
+diff -up kde-workspace-4.10.5/plasma/desktop/applets/kickoff/simpleapplet/simpleapplet.cpp.than kde-workspace-4.10.5/plasma/desktop/applets/kickoff/simpleapplet/simpleapplet.cpp
+--- kde-workspace-4.10.5/plasma/desktop/applets/kickoff/simpleapplet/simpleapplet.cpp.than	2014-02-18 20:51:12.709846549 +0100
++++ kde-workspace-4.10.5/plasma/desktop/applets/kickoff/simpleapplet/simpleapplet.cpp	2014-02-18 20:52:09.046847394 +0100
+@@ -307,7 +307,7 @@ MenuLauncherApplet::MenuLauncherApplet(Q
+                 d->viewtypes << "RunCommand";
+             }
+             d->viewtypes << "Leave";
+-            d->iconname = "start-here-kde";
++            d->iconname = "system-logo-icon";
+         }
+     }
+     d->formattype = NameDescription;

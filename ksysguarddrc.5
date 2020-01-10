@@ -1,0 +1,55 @@
+.TH "ksysguarddrc" "5" "ksysguardd" "ksysguardd configuration file"
+.SH NAME
+ksysguarddrc \- ksysguardd configuration
+.SH DESCRIPTION
+.sp
+ksysguardd uses a configuration file at /etc/ksysguarddrc.
+.SH PARAMETERS
+.sp
+There are 2 sections of configuration in the ksysguardd configuration file: LogFiles,
+Sensors.
+.SH [LogFiles] OPTIONS
+.sp
+.in
+the list of all available logfiles
+.in
+messages:/var/log/messages,kern:/var/log/kern.log,daemon:/var/log/daemon.log,syslog:/var/log/syslog,auth:/var/log/auth.log
+.SH [Sensors] OPTIONS
+.sp
+.in
+Sensors: the list of all accessible sensors
+.in
+   Apm             Advanced Power Management
+.in
+   Acpi            Advanced Configuration and Power Interface
+.in
+   CpuInfo         CPU-Clock information
+.in
+   DiskStat        partition space. Data comes from mtab, getmntent() and statfs()
+.in
+   DiskStats       disk throughput. Data comes from /etc/diskstats
+.in
+   LmSensors       information about motherboard and CPU
+.in
+   LoadAvg         system load values
+.in
+   LogFile         local logfiles
+.in
+   Memory          physical memory and swap
+.in
+   NetDev          throughput of network interfaces
+.in
+   NetStat         number of TCP/UDP/ICMP/Unix sockets
+.in
+   ProcessList     current processes
+.in
+   SoftRaid        Monitors software raid devices. See mdadm.
+.in
+   Stat            interrupts, CPU and disk throughput. Data comes from /etc/stat
+.in
+   Uptime          System uptime. Data comes from /etc/uptime
+.in
+Sensors=ProcessList,Memory,Stat,NetDev,NetStat,Apm,Acpi,CpuInfo,LoadAvg,LmSensors,DiskStat,LogFile,DiskStats,Uptime,SoftRaid
+.SH FILES
+.sp
+/etc/ksysguarddrc

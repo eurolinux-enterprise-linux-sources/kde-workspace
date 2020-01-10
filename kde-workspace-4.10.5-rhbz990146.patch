@@ -1,0 +1,112 @@
+diff -ur kde-workspace-orig/kcontrol/dateandtime/dtime.cpp kde-workspace-4.10.5/kcontrol/dateandtime/dtime.cpp
+--- kde-workspace-orig/kcontrol/dateandtime/dtime.cpp	2013-06-28 19:10:45.000000000 +0200
++++ kde-workspace-4.10.5/kcontrol/dateandtime/dtime.cpp	2013-12-05 23:59:09.833603024 +0100
+@@ -210,6 +210,7 @@
+ 
+   // read the currently set time zone
+   tzonelist->setSelected(KSystemTimeZones::local().name(), true);
++  emit timeChanged(false);
+ }
+ 
+ void Dtime::save( QVariantMap& helperargs )
+@@ -253,12 +254,11 @@
+ 
+   QStringList selectedZones(tzonelist->selection());
+ 
+-  if (selectedZones.count() > 0) {
+-    QString selectedzone(selectedZones[0]);
++  if (!selectedZones.isEmpty()) {
+     helperargs["tz"] = true;
+-    helperargs["tzone"] = selectedzone;
++    helperargs["tzone"] = selectedZones.first();
+   } else {
+-    helperargs["tzreset"] = true; // // make the helper reset the timezone
++    helperargs["tzreset"] = true; // make the helper reset the timezone
+   }
+ 
+   currentZone();
+Pouze v kde-workspace-4.10.5/kcontrol/dateandtime: dtime.cpp.orig
+diff -ur kde-workspace-orig/kcontrol/dateandtime/helper.cpp kde-workspace-4.10.5/kcontrol/dateandtime/helper.cpp
+--- kde-workspace-orig/kcontrol/dateandtime/helper.cpp	2013-06-28 19:10:44.000000000 +0200
++++ kde-workspace-4.10.5/kcontrol/dateandtime/helper.cpp	2013-12-05 23:59:09.834603030 +0100
+@@ -175,30 +175,32 @@
+ 
+         QString val = selectedzone;
+ #else
+-        QString tz = "/usr/share/zoneinfo/" + selectedzone;
++    QString tz = "/usr/share/zoneinfo/" + selectedzone;
+ 
+-        QString zic = KStandardDirs::findExe("zic", exePath);
+-        if (!zic.isEmpty()) {
+-            KProcess::execute(zic, QStringList() << "-l" << selectedzone);
+-        } else if (!QFile::remove("/etc/localtime")) {
+-          ret |= TimezoneError;
+-        } else if (!QFile::copy(tz, "/etc/localtime")) {
+-          ret |= TimezoneError;
+-        }
+-
+-        QFile fTimezoneFile("/etc/timezone");
+-
+-        if (fTimezoneFile.exists() && fTimezoneFile.open(QIODevice::WriteOnly | QIODevice::Truncate) ) {
+-            QTextStream t(&fTimezoneFile);
+-            t << selectedzone;
+-            fTimezoneFile.close();
+-        }
++    if (QFile::exists(tz)) { // make sure the new TZ really exists
++        QFile::remove("/etc/localtime");
++    } else {
++        return TimezoneError;
++    }
++
++    if (!QFile::link(tz, "/etc/localtime")) { // fail if we can't setup the new timezone
++        return TimezoneError;
++    }
++
++    QFile fTimezoneFile("/etc/timezone");
++
++    if (fTimezoneFile.exists() && fTimezoneFile.open(QIODevice::WriteOnly | QIODevice::Truncate) ) {
++        QTextStream t(&fTimezoneFile);
++        t << selectedzone;
++        fTimezoneFile.close();
++    }
+ 
+-        QString val = ':' + tz;
+ #endif // !USE_SOLARIS
+ 
+-        setenv("TZ", val.toAscii(), 1);
+-        tzset();
++    QString val = ':' + selectedzone;
++
++    setenv("TZ", val.toUtf8(), 1);
++    tzset();
+ 
+     return ret;
+ }
+@@ -206,11 +208,11 @@
+ int ClockHelper::tzreset()
+ {
+ #if !defined(USE_SOLARIS) // Do not update the System!
+-        unlink( "/etc/timezone" );
+-        unlink( "/etc/localtime" );
++    unlink( "/etc/timezone" );
++    unlink( "/etc/localtime" );
+ 
+-        setenv("TZ", "", 1);
+-        tzset();
++    setenv("TZ", "", 1);
++    tzset();
+ #endif // !USE SOLARIS
+     return 0;
+ }
+diff -ur kde-workspace-orig/kcontrol/dateandtime/main.cpp kde-workspace-4.10.5/kcontrol/dateandtime/main.cpp
+--- kde-workspace-orig/kcontrol/dateandtime/main.cpp	2013-06-28 19:10:44.000000000 +0200
++++ kde-workspace-4.10.5/kcontrol/dateandtime/main.cpp	2013-12-05 23:59:09.834603030 +0100
+@@ -95,7 +95,7 @@
+ 
+   if (reply.failed()) {
+     if (reply.type() == ActionReply::KAuthError) {
+-          KMessageBox::error(this, i18n("Unable to authenticate/execute the action: %1, %2", reply.errorCode(), reply.errorDescription()));
++        KMessageBox::error(this, i18n("Unable to authenticate/execute the action: %1, %2", reply.errorCode(), reply.errorDescription()));
+     } else {
+         dtime->processHelperErrors(reply.errorCode());
+     }

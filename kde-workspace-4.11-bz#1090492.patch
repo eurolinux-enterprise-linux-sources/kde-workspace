@@ -1,0 +1,23 @@
+diff --git a/libs/plasmaclock/calendartable.cpp b/libs/plasmaclock/calendartable.cpp
+index 9361a6a..5cba031 100644
+--- a/libs/plasmaclock/calendartable.cpp
++++ b/libs/plasmaclock/calendartable.cpp
+@@ -101,6 +101,7 @@ class CalendarTablePrivate
+             delayedPopulationTimer->setInterval(0);
+             delayedPopulationTimer->setSingleShot(true);
+             QObject::connect(delayedPopulationTimer, SIGNAL(timeout()), q, SLOT(populateCalendar()));
++            QObject::connect(KGlobalSettings::self(), SIGNAL(settingsChanged(int)), q, SLOT(settingsChanged(int)));
+ 
+             setDate(initialDate);
+         }
+@@ -844,6 +845,10 @@ void CalendarTablePrivate::settingsChanged(int category)
+     }
+ 
+     calendar = KGlobal::locale()->calendar();
++    setCalendar(calendar);
++    // Signal out date change so any dependents will update as well
++    emit q->dateChanged(q->date(), q->date());
++    emit q->dateChanged(q->date());
+     q->update();
+ }
+ 

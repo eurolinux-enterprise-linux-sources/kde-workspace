@@ -1,0 +1,14 @@
+diff -up kde-workspace-4.10.5/libs/plasmaclock/clockapplet.cpp.orig kde-workspace-4.10.5/libs/plasmaclock/clockapplet.cpp
+--- kde-workspace-4.10.5/libs/plasmaclock/clockapplet.cpp.orig	2014-08-18 14:20:18.050240750 +0200
++++ kde-workspace-4.10.5/libs/plasmaclock/clockapplet.cpp	2014-08-18 14:42:14.695048549 +0200
+@@ -373,7 +373,9 @@ void ClockApplet::createConfigurationInt
+ 
+     QWidget *generalWidget = new QWidget();
+     d->generalUi.setupUi(generalWidget);
++#ifdef JOVIE_FOUND
+     parent->addPage(generalWidget, i18nc("General configuration page", "General"), Applet::icon());
++#endif
+ 
+     d->generalUi.intervalCombo->addItem(i18nc("@inmenu interval between speaking clock", "Never"), QVariant(0));
+     d->generalUi.intervalCombo->addItem(i18nc("@inmenu interval between speaking clock", "Every minute"), QVariant(1));
+diff -up kde-workspace-4.10.5/libs/plasmaclock/generalConfig.ui.orig kde-workspace-4.10.5/libs/plasmaclock/generalConfig.ui

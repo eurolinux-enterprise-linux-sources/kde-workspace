@@ -1,0 +1,15 @@
+diff -up kde-workspace-4.10.5/kcontrol/krdb/krdb.cpp.krdb kde-workspace-4.10.5/kcontrol/krdb/krdb.cpp
+--- kde-workspace-4.10.5/kcontrol/krdb/krdb.cpp.krdb	2013-06-28 19:10:44.184424737 +0200
++++ kde-workspace-4.10.5/kcontrol/krdb/krdb.cpp	2014-07-16 17:22:30.084547381 +0200
+@@ -538,9 +539,9 @@ void runRdb( uint flags )
+ 
+   KProcess proc;
+ #ifndef NDEBUG
+-  proc << "xrdb" << "-merge" << tmpFile.fileName();
++  proc << "xrdb" << "-cpp" << "/bin/cpp" << "-merge" << tmpFile.fileName();
+ #else
+-  proc << "xrdb" << "-quiet" << "-merge" << tmpFile.fileName();
++  proc << "xrdb" << "-cpp" << "/bin/cpp" << "-quiet" << "-merge" << tmpFile.fileName();
+ #endif
+   proc.execute();
+ 

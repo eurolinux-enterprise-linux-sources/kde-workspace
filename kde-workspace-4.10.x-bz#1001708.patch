@@ -1,0 +1,49 @@
+From 001d9cd69dfa6fe2a827d01e94727912c3483ae9 Mon Sep 17 00:00:00 2001
+From: Martin Briza <mbriza@redhat.com>
+Date: Mon, 7 Oct 2013 18:01:58 +0200
+Subject: [PATCH] kcontrol/dateandtime: Check for valid return value of
+ QDateTime::toTime_t()
+
+---
+ kcontrol/dateandtime/dtime.cpp  | 7 ++++++-
+ kcontrol/dateandtime/helper.cpp | 6 +++++-
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/kcontrol/dateandtime/dtime.cpp b/kcontrol/dateandtime/dtime.cpp
+index 518afe5..feb5799 100644
+--- a/kcontrol/dateandtime/dtime.cpp
++++ b/kcontrol/dateandtime/dtime.cpp
+@@ -252,7 +252,12 @@ void Dtime::save( QVariantMap& helperargs )
+     kDebug() << "Set date " << dt;
+ 
+     helperargs["date"] = true;
+-    helperargs["newdate"] = QString::number(dt.toTime_t());
++    time_t newDate = dt.toTime_t();
++    if (newDate == (unsigned int) -1) { // toTime_t() error
++        helperargs["newdate"] = QString("Overflow");
++    } else {
++        helperargs["newdate"] = QString::number(newDate);
++    }
+     helperargs["olddate"] = QString::number(::time(0));
+   }
+ 
+diff --git a/kcontrol/dateandtime/helper.cpp b/kcontrol/dateandtime/helper.cpp
+index 9168db3..3e994e2 100644
+--- a/kcontrol/dateandtime/helper.cpp
++++ b/kcontrol/dateandtime/helper.cpp
+@@ -94,7 +94,11 @@ int ClockHelper::date( const QString& newdate, const QString& olddate )
+ {
+     struct timeval tv;
+ 
+-    tv.tv_sec = newdate.toULong() - olddate.toULong() + time(0);
++    bool ok;
++    tv.tv_sec = newdate.toULong(&ok) - olddate.toULong() + time(0);
++    if (!ok) {
++        return DateError;
++    }
+     tv.tv_usec = 0;
+     if (settimeofday(&tv, 0)) {
+         return DateError;
+-- 
+1.8.3.1
+

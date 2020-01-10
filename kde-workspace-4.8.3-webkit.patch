@@ -1,0 +1,104 @@
+diff -up kde-workspace-4.8.3/krunner/ksystemactivitydialog.cpp.webkit kde-workspace-4.8.3/krunner/ksystemactivitydialog.cpp
+--- kde-workspace-4.8.3/krunner/ksystemactivitydialog.cpp.webkit	2012-05-07 15:38:33.380747874 +0200
++++ kde-workspace-4.8.3/krunner/ksystemactivitydialog.cpp	2012-05-07 15:38:48.108759698 +0200
+@@ -41,7 +41,6 @@ KSystemActivityDialog::KSystemActivityDi
+     setWindowIcon(KIcon(QLatin1String( "utilities-system-monitor" )));
+     setButtons(0);
+     setMainWidget(&m_processList);
+-    m_processList.setScriptingEnabled(true);
+     setSizeGripEnabled(true);
+     (void)minimumSizeHint(); //Force the dialog to be laid out now
+     layout()->setContentsMargins(0,0,0,0);
+diff -up kde-workspace-4.8.3/ksysguard/gui/SensorDisplayLib/ProcessController.cpp.webkit kde-workspace-4.8.3/ksysguard/gui/SensorDisplayLib/ProcessController.cpp
+--- kde-workspace-4.8.3/ksysguard/gui/SensorDisplayLib/ProcessController.cpp.webkit	2012-05-07 15:34:25.472580194 +0200
++++ kde-workspace-4.8.3/ksysguard/gui/SensorDisplayLib/ProcessController.cpp	2012-05-07 15:34:30.485583409 +0200
+@@ -147,7 +147,6 @@ bool ProcessController::addSensor(const
+     mProcessList = new KSysGuardProcessList(this, hostName);
+     mProcessList->setUpdateIntervalMSecs(0); //we will call updateList() manually
+     mProcessList->setContentsMargins(0,0,0,0);
+-    mProcessList->setScriptingEnabled(true);
+     addActions(mProcessList->actions());
+     connect(mProcessList, SIGNAL(updated()), this, SIGNAL(updated()));
+     connect(mProcessList, SIGNAL(processListChanged()), this, SIGNAL(processListChanged()));
+diff -up kde-workspace-4.8.3/libs/ksysguard/CMakeLists.txt.webkit kde-workspace-4.8.3/libs/ksysguard/CMakeLists.txt
+--- kde-workspace-4.8.3/libs/ksysguard/CMakeLists.txt.webkit	2012-04-29 23:05:49.239145354 +0200
++++ kde-workspace-4.8.3/libs/ksysguard/CMakeLists.txt	2012-05-07 15:21:28.103104008 +0200
+@@ -21,6 +21,3 @@ add_subdirectory( processui )
+ add_subdirectory( signalplotter )
+ add_subdirectory( ksgrd )
+ add_subdirectory( tests )
+-
+-install(DIRECTORY scripts/ DESTINATION ${DATA_INSTALL_DIR}/ksysguard/scripts)
+-
+diff -up kde-workspace-4.8.3/libs/ksysguard/processui/CMakeLists.txt.webkit kde-workspace-4.8.3/libs/ksysguard/processui/CMakeLists.txt
+--- kde-workspace-4.8.3/libs/ksysguard/processui/CMakeLists.txt.webkit	2012-04-29 23:05:49.242145324 +0200
++++ kde-workspace-4.8.3/libs/ksysguard/processui/CMakeLists.txt	2012-05-07 15:21:28.104104008 +0200
+@@ -12,7 +12,6 @@ set(processui_LIB_SRCS
+    ProcessModel.cpp
+    ReniceDlg.cpp
+    KTextEditVT.cpp
+-   scripting.cpp
+ )
+ 
+ kde4_add_ui_files( processui_LIB_SRCS
+@@ -27,7 +26,7 @@ if(X11_XRes_FOUND)
+   include_directories(${X11_XRes_INCLUDE_PATH})
+ endif(X11_XRes_FOUND)
+ 
+-target_link_libraries(processui ${KDE4_KDEUI_LIBS} ${QT_QTSCRIPT_LIBRARY} ${QT_QTWEBKIT_LIBRARY} processcore)
++target_link_libraries(processui ${KDE4_KDEUI_LIBS} processcore)
+ target_link_libraries(processui LINK_INTERFACE_LIBRARIES ${KDE4_KDEUI_LIBS} processcore)
+ 
+ 
+diff -up kde-workspace-4.8.3/libs/ksysguard/processui/ksysguardprocesslist.cpp.webkit kde-workspace-4.8.3/libs/ksysguard/processui/ksysguardprocesslist.cpp
+--- kde-workspace-4.8.3/libs/ksysguard/processui/ksysguardprocesslist.cpp.webkit	2012-04-29 23:05:49.245145296 +0200
++++ kde-workspace-4.8.3/libs/ksysguard/processui/ksysguardprocesslist.cpp	2012-05-07 15:21:28.104104008 +0200
+@@ -894,9 +894,6 @@ void KSysGuardProcessList::hideEvent ( Q
+     //Stop updating the process list if we are hidden
+     if(d->mUpdateTimer)
+         d->mUpdateTimer->stop();
+-    //stop any scripts running, to save on memory
+-    if(d->mScripting)
+-        d->mScripting->stopAllScripts();
+     QWidget::hideEvent(event);
+ }
+ 
+@@ -1419,16 +1416,3 @@ bool KSysGuardProcessList::scriptingEnab
+ {
+     return !!d->mScripting;
+ }
+-void KSysGuardProcessList::setScriptingEnabled(bool enabled)
+-{
+-    if(!!d->mScripting == enabled)
+-        return;  //Nothing changed
+-    if(!enabled) {
+-        delete d->mScripting;
+-        d->mScripting = NULL;
+-    } else {
+-        d->mScripting = new Scripting(this);
+-        d->mScripting->hide();
+-    }
+-
+-}
+diff -up kde-workspace-4.8.3/libs/ksysguard/processui/ksysguardprocesslist.h.webkit kde-workspace-4.8.3/libs/ksysguard/processui/ksysguardprocesslist.h
+--- kde-workspace-4.8.3/libs/ksysguard/processui/ksysguardprocesslist.h.webkit	2012-04-29 23:05:49.245145296 +0200
++++ kde-workspace-4.8.3/libs/ksysguard/processui/ksysguardprocesslist.h	2012-05-07 15:21:28.105104008 +0200
+@@ -52,7 +52,6 @@ class KDE_EXPORT KSysGuardProcessList :
+         Q_PROPERTY( int updateIntervalMSecs READ updateIntervalMSecs WRITE setUpdateIntervalMSecs )
+         Q_PROPERTY( ProcessModel::Units units READ units WRITE setUnits )
+         Q_PROPERTY( bool killButtonVisible READ isKillButtonVisible WRITE setKillButtonVisible )
+-        Q_PROPERTY( bool scriptingEnabled READ scriptingEnabled WRITE setScriptingEnabled )
+         Q_ENUMS( ProcessFilter::State )
+         Q_ENUMS( ProcessModel::Units )
+ 
+@@ -112,10 +111,6 @@ class KDE_EXPORT KSysGuardProcessList :
+          *
+          *  Default is false. */
+         bool scriptingEnabled() const;
+-        /** Set whether scripting support is enabled.
+-         *
+-         *  Default is false. */
+-        void setScriptingEnabled(bool enabled);
+ 
+     Q_SIGNALS:
+         /** Emitted when the display has been updated */

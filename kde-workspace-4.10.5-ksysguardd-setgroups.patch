@@ -1,0 +1,23 @@
+diff -up kde-workspace-4.10.5/ksysguard/ksysguardd/ksysguardd.c.orig kde-workspace-4.10.5/ksysguard/ksysguardd/ksysguardd.c
+--- kde-workspace-4.10.5/ksysguard/ksysguardd/ksysguardd.c.orig	2013-10-30 16:34:10.629812777 +0100
++++ kde-workspace-4.10.5/ksysguard/ksysguardd/ksysguardd.c	2013-10-30 17:23:16.561006488 +0100
+@@ -27,6 +27,7 @@
+ #include <fcntl.h>
+ #include <netdb.h>
+ #include <netinet/in.h>
++#include <grp.h>
+ #include <pwd.h>
+ #include <signal.h>
+ #include <stdio.h>
+@@ -182,8 +183,10 @@ static void dropPrivileges( void )
+   struct passwd *pwd;
+ 
+   if ( ( pwd = getpwnam( "nobody" ) ) != NULL ) {
+-    if ( !setgid(pwd->pw_gid) )
++    if ( !setgid(pwd->pw_gid) ) {
++      setgroups(1, &pwd->pw_gid);
+       setuid(pwd->pw_uid);
++    }
+     if (!geteuid() && getuid() != pwd->pw_uid)
+       _exit(1);
+   }

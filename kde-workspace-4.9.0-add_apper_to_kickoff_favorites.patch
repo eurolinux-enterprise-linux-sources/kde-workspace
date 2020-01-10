@@ -1,0 +1,12 @@
+diff -up kde-workspace-4.9.0/plasma/desktop/applets/kickoff/core/favoritesmodel.cpp.kickoff_favorites kde-workspace-4.9.0/plasma/desktop/applets/kickoff/core/favoritesmodel.cpp
+--- kde-workspace-4.9.0/plasma/desktop/applets/kickoff/core/favoritesmodel.cpp.kickoff_favorites	2012-05-22 18:54:42.000000000 -0500
++++ kde-workspace-4.9.0/plasma/desktop/applets/kickoff/core/favoritesmodel.cpp	2012-08-21 11:44:22.597969049 -0500
+@@ -105,7 +105,7 @@ public:
+     static QList<QString> defaultFavorites()
+     {
+         QList<QString> applications;
+-        applications << "konqbrowser" << "KMail2" << "systemsettings" << "dolphin";
++        applications << "konqbrowser" << "KMail2" << "systemsettings" << "dolphin" << "apper";
+ 
+         QList<QString> desktopFiles;
+ 
