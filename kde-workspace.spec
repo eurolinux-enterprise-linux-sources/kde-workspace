@@ -22,7 +22,7 @@
 Summary: KDE Workspace
 Name:    kde-workspace
 Version: 4.11.19
-Release: 12%{?dist}
+Release: 13%{?dist}
 License: GPLv2
 URL:     https://projects.kde.org/projects/kde/kde-workspace
 Source0: http://download.kde.org/stable/applications/src/14.12.1/kde-workspace-%{version}.tar.xz
@@ -169,6 +169,12 @@ Patch69: kde-workspace-taskmanager-grouping.patch
 # Fix unlocking of screenlocker
 # Bug 1333441 - System not unlocking on extended monitors when using screensaver
 Patch70: kde-workspace-kscreenlocker-greeter-unlock-just-once.patch
+
+# Bug 1568853 - CVE-2018-6790 kde-workspace: Missing sanitization of notifications allows to leak client IP address via IMG element
+Patch71: kde-workspace-sanitise-notification-html.patch
+
+# Bug 1611762 - ksysguardd: "internal buffer too small to read /proc/cpuinfo" when running with many CPUs
+Patch72: kde-workspace-ksysguard-increase-cpu-buffer.patch
 
 ## upstream patches
 Patch101: kde-workspace-4.10-bz#921742.patch
@@ -605,6 +611,8 @@ Conflicts: kde-workspace < 4.11.15-3
 %patch68 -p1 -b .coverity-scan-fixes
 %patch69 -p1 -b .taskmanager-grouping
 %patch70 -p1 -b .kscreenlocker-greeter-unlock-just-once
+%patch71 -p1 -b .sanitise-notification-html
+%patch72 -p1 -b .ksysguard-increase-cpu-buffer
 
 # upstream patches
 %patch101 -p1 -b .bug921742
@@ -1372,6 +1380,13 @@ fi
 %endif
 
 %changelog
+* Tue Feb 12 2019 Jan Grulich <jgrulich@redhat.com> - 4.11-19-13
+- Sanitise notification HTML
+  Resolves: bz#1568853
+
+- Increase cpu buffer size in ksysguard
+  Resolves: bz#1611762
+
 * Mon Oct 16 2017 Jan Grulich <jgrulich@redhat.com> - 4.11.19-12
 - Make sure that plasma screensaver is not used when previously configured
   Resolves: bz#1342560
