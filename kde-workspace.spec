@@ -22,7 +22,7 @@
 Summary: KDE Workspace
 Name:    kde-workspace
 Version: 4.11.19
-Release: 7%{?dist}
+Release: 8%{?dist}
 License: GPLv2
 URL:     https://projects.kde.org/projects/kde/kde-workspace
 Source0: http://download.kde.org/stable/applications/src/14.12.1/kde-workspace-%{version}.tar.xz
@@ -182,6 +182,7 @@ Patch301: kde-workspace-4.10.5-bz#1063302-branding.patch
 Patch302: kde-workspace-exclude_kdm.patch
 Patch303: powerdevil-upower-0.99.patch
 Patch304: kde-workspace-revert-improve-systemtray-on-hdpi-displays.patch
+Patch305: kde-workspace-close-menu-on-closed-task.patch
 
 ## trunk (Plasma 5) patches
 
@@ -616,6 +617,7 @@ Conflicts: kde-workspace < 4.11.15-3
 %endif
 %patch303 -p1 -b .powerdevil-upower099
 %patch304 -p1 -b .improve-systemtray-on-hdpi-displays
+%patch305 -p1 -b .close-menu-on-closed-task.patch
 
 # trunk patches
 
@@ -1356,6 +1358,12 @@ fi
 %endif
 
 %changelog
+* Tue Mar 22 2016 Jan Grulich <jgrulich@redhat.com> - 4.11.10-8
+- Powerdevil: do not notify about a non existent action
+  Resolves: bz#1289149
+- Plasma taskmanager: close context menu when task is closed
+  Resolves: bz#1262603
+
 * Mon Sep 07 2015 Jan Grulich <jgrulich@redhat.com> - 4.11-19-7
 - Requires: cpp
   Resolves: bz#1260129
