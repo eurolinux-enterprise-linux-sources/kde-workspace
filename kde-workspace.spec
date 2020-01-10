@@ -22,7 +22,7 @@
 Summary: KDE Workspace
 Name:    kde-workspace
 Version: 4.11.19
-Release: 13%{?dist}
+Release: 7%{?dist}
 License: GPLv2
 URL:     https://projects.kde.org/projects/kde/kde-workspace
 Source0: http://download.kde.org/stable/applications/src/14.12.1/kde-workspace-%{version}.tar.xz
@@ -71,7 +71,7 @@ Patch17: kde-workspace-4.7.80-classicmenu-logout.patch
 
 # SUSE kudos! plymouth fixed by Laercio de Sousa and Stefan Brüns
 Patch19: kde-workspace-4.11.1-kdm_plymouth081.patch
-Patch20: kdebase-workspace-4.4.92-xsession_errors_O_APPEND.patch
+Patch20: kdebase-workspace-4.4.92-xsession_errors_O_APPEND.patch 
 
 # support the widgetStyle4 hack in the Qt KDE platform plugin
 Patch21: kdebase-workspace-4.3.98-platformplugin-widgetstyle4.patch
@@ -80,7 +80,7 @@ Patch21: kdebase-workspace-4.3.98-platformplugin-widgetstyle4.patch
 # https://projects.kde.org/projects/kde/kde-workspace/repository/revisions/2bbbbdd8fe5a38ae27bab44c9515b2ba78f75277
 # https://bugzilla.redhat.com/show_bug.cgi?id=747982
 # https://bugs.kde.org/show_bug.cgi?id=284628
-Patch25: kde-workspace-4.10.3-bz#747982-launchers.patch
+Patch25: kde-workspace-4.10.3-bz#747982-launchers.patch 
 
 # add org.kde.ktp-presence applet to default systray
 Patch26: kde-workspace-4.10.2-systray_org.kde.ktp-presence.patch
@@ -111,7 +111,7 @@ Patch50: kde-workspace-4.10.90-kde#171685.patch
 # Apper is hard to find, http://bugzilla.redhat.com/850445
 Patch51: kde-workspace-4.9.0-add_apper_to_kickoff_favorites.patch
 
-# use /etc/login.defs to define a 'system' account instead of hard-coding 500
+# use /etc/login.defs to define a 'system' account instead of hard-coding 500 
 Patch52: kde-workspace-4.8.2-bz#732830-login.patch
 
 # kdm overwrites ~/.Xauthority with wrong SELinux context on logout
@@ -130,7 +130,7 @@ Patch55: kde-workspace-4.10.2-BUILD_KCM_RANDR.patch
 # https://bugzilla.redhat.com/show_bug.cgi?id=1187957
 Patch56: kde-workspace-kdm_local_ipv6.patch
 
-# pam/systemd bogosity: kdm restart/shutdown does not work
+# pam/systemd bogosity: kdm restart/shutdown does not work 
 # http://bugzilla.redhat.com/796969
 Patch57: kde-workspace-4.8.0-bug796969.patch
 
@@ -162,20 +162,6 @@ Patch67: kde-workspace-4.11-remove-dependency-on-kdepimlibs-4.11.patch
 # Fix coverity scan issues
 Patch68: kde-workspace-4.11.19-coverity-scan-fixes.patch
 
-# Fix grouping of tasks in taskmanager applet
-# Bug 1348917 - Display problem with applications grouped by type (> 20 programs) in KDE4
-Patch69: kde-workspace-taskmanager-grouping.patch
-
-# Fix unlocking of screenlocker
-# Bug 1333441 - System not unlocking on extended monitors when using screensaver
-Patch70: kde-workspace-kscreenlocker-greeter-unlock-just-once.patch
-
-# Bug 1568853 - CVE-2018-6790 kde-workspace: Missing sanitization of notifications allows to leak client IP address via IMG element
-Patch71: kde-workspace-sanitise-notification-html.patch
-
-# Bug 1611762 - ksysguardd: "internal buffer too small to read /proc/cpuinfo" when running with many CPUs
-Patch72: kde-workspace-ksysguard-increase-cpu-buffer.patch
-
 ## upstream patches
 Patch101: kde-workspace-4.10-bz#921742.patch
 Patch104: kde-workspace-4.10.x-bz#1001708.patch
@@ -196,9 +182,6 @@ Patch301: kde-workspace-4.10.5-bz#1063302-branding.patch
 Patch302: kde-workspace-exclude_kdm.patch
 Patch303: powerdevil-upower-0.99.patch
 Patch304: kde-workspace-revert-improve-systemtray-on-hdpi-displays.patch
-Patch305: kde-workspace-close-menu-on-closed-task.patch
-Patch306: kde-workspace-4.11-fix-loading-get-hot-new-stuff.patch
-Patch307: kde-workspace-disable-plasma-screensaver.patch
 
 ## trunk (Plasma 5) patches
 
@@ -246,7 +229,7 @@ BuildRequires: libjpeg-devel
 BuildRequires: libutempter-devel
 %ifnarch s390 s390x
 BuildRequires: lm_sensors-devel
-BuildRequires: pkgconfig(libraw1394)
+BuildRequires: pkgconfig(libraw1394) 
 %endif
 BuildRequires: pam-devel
 %if 0%{?fedora}
@@ -357,7 +340,7 @@ This package contains:
 Summary:  Development files for %{name}
 Obsoletes: kdebase-workspace-devel < 4.7.97-10
 Provides:  kdebase-workspace-devel = %{version}-%{release}
-Provides: solid-bluetooth-devel = %{version}-%{release}
+Provides: solid-bluetooth-devel = %{version}-%{release} 
 Requires: ksysguard-libs%{?_isa} = %{version}-%{release}
 Requires: kwin-libs%{?_isa} = %{version}-%{release}
 %if 0%{?gles}
@@ -376,7 +359,7 @@ Summary: Runtime libraries for %{name}
 Obsoletes: kdebase-workspace-libs < 4.7.97-10
 Provides:  kdebase-workspace-libs = %{version}-%{release}
 Provides:  kdebase-workspace-libs%{?_isa} = %{version}-%{release}
-Provides: solid-bluetooth = %{version}-%{release}
+Provides: solid-bluetooth = %{version}-%{release} 
 Requires: libkworkspace%{?_isa} = %{version}-%{release}
 %{?kdelibs4_requires}
 # at least while oyxgen style is default
@@ -417,7 +400,7 @@ KDM provides the graphical login screen, shown shortly after boot up,
 log out, and when user switching.
 
 %package -n kdm-themes
-Summary: KDM Themes
+Summary: KDM Themes 
 group: User Interface/X
 Obsoletes: kdm < 4.7.3-9
 Requires: kdm = %{version}-%{release}
@@ -430,7 +413,7 @@ A collection of kdm themes, including: circles, horos, oxygen, oxygen-air,
 as well as stripes wallpaper.
 
 %package -n kgreeter-plugins
-Summary: KDE Greeter Plugin Components
+Summary: KDE Greeter Plugin Components 
 # kgreet_* plugins moved
 Conflicts: kdm < 4.6.90-4
 Conflicts: kde-workspace < 4.7.80-3
@@ -473,7 +456,7 @@ Conflicts: %{name}-libs%{?_isa} <= 4.11.14-1
 %description -n kwin-libs
 %{summary}.
 
-%package -n kwin-gles
+%package -n kwin-gles 
 Summary: KWin built to support GLES
 # for libkwin* and friends
 Requires: kwin-libs%{?_isa} = %{version}-%{release}
@@ -482,7 +465,7 @@ Requires: kwin = %{version}-%{release}
 %{summary}.
 
 %package -n kwin-gles-libs
-Summary: Runtime libraries for kwin-gles
+Summary: Runtime libraries for kwin-gles 
 %description -n kwin-gles-libs
 %{summary}.
 
@@ -514,19 +497,19 @@ BuildArch: noarch
 %description -n oxygen-cursor-themes
 %{summary}.
 
-%package -n plasma-scriptengine-python
+%package -n plasma-scriptengine-python 
 Summary: Plasma scriptengine for python
 Obsoletes: %{name}-python-applet < 4.5.80-7
 Provides:  %{name}-python-applet = %{version}-%{release}
 Requires: %{name} = %{version}-%{release}
 Requires: pykde4%{?_isa}
-%description -n plasma-scriptengine-python
+%description -n plasma-scriptengine-python 
 %{summary}.
 
 %package -n plasma-scriptengine-ruby
-Summary: Plasma scriptengine for ruby
+Summary: Plasma scriptengine for ruby 
 Requires: %{name} = %{version}-%{release}
-Requires: ruby
+Requires: ruby 
 %description -n plasma-scriptengine-ruby
 %{summary}.
 
@@ -609,10 +592,6 @@ Conflicts: kde-workspace < 4.11.15-3
 %patch66 -p1 -b .weather-fix-bbcukmet-crash
 %patch67 -p1 -b .remove-dependency-on-kdepimlibs-4.11
 %patch68 -p1 -b .coverity-scan-fixes
-%patch69 -p1 -b .taskmanager-grouping
-%patch70 -p1 -b .kscreenlocker-greeter-unlock-just-once
-%patch71 -p1 -b .sanitise-notification-html
-%patch72 -p1 -b .ksysguard-increase-cpu-buffer
 
 # upstream patches
 %patch101 -p1 -b .bug921742
@@ -637,9 +616,6 @@ Conflicts: kde-workspace < 4.11.15-3
 %endif
 %patch303 -p1 -b .powerdevil-upower099
 %patch304 -p1 -b .improve-systemtray-on-hdpi-displays
-%patch305 -p1 -b .close-menu-on-closed-task.patch
-%patch306 -p1 -b .fix-loading-get-hot-new-stuff
-%patch307 -p1 -b .disable-plasma-screensaver
 
 # trunk patches
 
@@ -681,7 +657,7 @@ pushd %{_target_platform}
   ..
 popd
 
-make %{?_smp_mflags} -C %{_target_platform}
+make %{?_smp_mflags} -C %{_target_platform} 
 
 
 %install
@@ -1380,37 +1356,6 @@ fi
 %endif
 
 %changelog
-* Tue Feb 12 2019 Jan Grulich <jgrulich@redhat.com> - 4.11-19-13
-- Sanitise notification HTML
-  Resolves: bz#1568853
-
-- Increase cpu buffer size in ksysguard
-  Resolves: bz#1611762
-
-* Mon Oct 16 2017 Jan Grulich <jgrulich@redhat.com> - 4.11.19-12
-- Make sure that plasma screensaver is not used when previously configured
-  Resolves: bz#1342560
-
-* Fri Oct 13 2017 Jan Grulich <jgrulich@redhat.com> - 4.11.19-11
-- Disable plasma screensaver for security reasons
-  Resolves: bz#1342560
-
-* Tue Sep 26 2017 Jan Grulich <jgrulich@redhat.com> - 4.11.19-10
-- Fix grouping of tasks in taskmanager applet
-  Resolves: bz#1348917
-- Fix unlocking of kscreenlocker, unlock it just once
-  Resolves: bz#1333441
-
-* Mon Sep 11 2017 Jan Grulich <jgrulich@redhat.com> - 4.11.19-9
-- Fix loading of get hot new stuff for KWin decorations and effects
-  Resolves: bz#1422002
-
-* Tue Mar 22 2016 Jan Grulich <jgrulich@redhat.com> - 4.11.19-8
-- Powerdevil: do not notify about a non existent action
-  Resolves: bz#1289149
-- Plasma taskmanager: close context menu when task is closed
-  Resolves: bz#1262603
-
 * Mon Sep 07 2015 Jan Grulich <jgrulich@redhat.com> - 4.11-19-7
 - Requires: cpp
   Resolves: bz#1260129
@@ -1697,7 +1642,7 @@ fi
 - Fixing user switching with SystemD (#859347), for LightDM
 
 * Thu Oct 04 2012 Rex Dieter <rdieter@fedoraproject.org> 4.9.2-4
-- ongoing systemd_inhibit work (#859227)
+- ongoing systemd_inhibit work (#859227) 
 
 * Mon Oct 01 2012 Rex Dieter <rdieter@fedoraproject.org> 4.9.2-3
 - tarball respin (includes plasma/python2 patch)
@@ -1729,11 +1674,11 @@ fi
 - upstream patch for kwin regression (kde#306260, kde#306275)
 
 * Mon Sep 03 2012 Than Ngo <than@redhat.com> - 4.9.1-1
-- 4.9.1
+- 4.9.1 
 
 * Mon Aug 27 2012 Lukáš Tinkl <ltinkl@redhat.com> 4.9.0-6
 - Resolves #851887 - KDE Logout does not Suspend to RAM/Disk
-
+  
 * Tue Aug 21 2012 Rex Dieter <rdieter@fedoraproject.org> 4.9.0-5
 - Add apper to default kickoff favorites (#850445)
 
@@ -1901,7 +1846,7 @@ fi
 -libs: move libkworkspace (versioned) dep here (from -devel)
 
 * Thu Dec 08 2011 Rex Dieter <rdieter@fedoraproject.org> 4.7.90-2
-- kwin-gles: move kwin4_effect_gles_builtins here
+- kwin-gles: move kwin4_effect_gles_builtins here 
 
 * Sat Dec 03 2011 Rex Dieter <rdieter@fedoraproject.org> 4.7.90-1
 - 4.7.90
@@ -2054,7 +1999,7 @@ fi
 - rebuild (qt48)
 
 * Mon Jul 18 2011 Rex Dieter <rdieter@fedoraproject.org> 4.6.95-3
-- Conflicts: kdm < 4.6.90-4 (when kgreet_* plugins moved)
+- Conflicts: kdm < 4.6.90-4 (when kgreet_* plugins moved) 
 
 * Tue Jul 12 2011 Rex Dieter <rdieter@fedoraproject.org> 4.6.95-2
 - fix redhat_startkde.patch
@@ -2143,7 +2088,7 @@ fi
 * Mon Mar 07 2011 Rex Dieter <rdieter@fedoraproject.org> 4.6.1-2
 - use system-kde-theme again (ie, lovelock-kde-theme on f15)
 - -Requires: system-backgrounds-kde
-- +Requires: system-plasma-desktoptheme
+- +Requires: system-plasma-desktoptheme 
 - -ksplash-themes: move Default (Air+Horos) ksplash theme here
 
 * Sat Feb 26 2011 Rex Dieter <rdieter@fedoraproject.org> 4.6.1-1
@@ -2166,7 +2111,7 @@ fi
 - startkde: drop MALLOC_CHECK bits
 
 * Tue Jan 25 2011 Lukas Tinkl <ltinkl@redhat.com> - 4.6.0-3
-- respun tarball, omit (now upstreamed) PowerDevil
+- respun tarball, omit (now upstreamed) PowerDevil 
   fixes from 4.6.0-2
 
 * Mon Jan 24 2011 Lukas Tinkl <ltinkl@redhat.com> - 4.6.0-2
@@ -2331,8 +2276,8 @@ fi
 - 4.4.3
 
 * Tue Apr 13 2010 Rex Dieter <rdieter@fedoraproject.org> - 4.4.2-5
-- powerdevil only autosuspends once/twice (kde#221648)
-- CVE-2010-0436
+- powerdevil only autosuspends once/twice (kde#221648) 
+- CVE-2010-0436 
 
 * Mon Apr 12 2010 Rex Dieter <rdieter@fedoraproject.org> - 4.4.2-4
 - another stab at f13 kdm/plymouth love (#577482)
@@ -2544,7 +2489,7 @@ fi
 - Fix typo
 
 * Thu Aug 27 2009 Rex Dieter <rdieter@fedoraproject.org> - 4.3.0-101
-- inflate Release tag, avoiding possible upgrade/obsoletes pain
+- inflate Release tag, avoiding possible upgrade/obsoletes pain 
 - -devel: drop Provides: PolicyKit-kde-devel, bump Obsoletes
 
 * Thu Aug 27 2009 Rex Dieter <rdieter@fedoraproject.org> - 4.3.0-12
@@ -2657,7 +2602,7 @@ fi
 - 4.2.3
 
 * Tue Apr 28 2009 Lukáš Tinkl <ltinkl@redhat.com> - 4.2.2-5
-- #497657 -  kpackagekit/kopete notification misrendering/missing
+- #497657 -  kpackagekit/kopete notification misrendering/missing 
   buttons with qt-4.5.1
 
 * Wed Apr 22 2009 Than Ngo <than@redhat.com> - 4.2.2-4
@@ -2759,7 +2704,7 @@ fi
 
 * Thu Jan 29 2009 Rex Dieter <rdieter@fedoraproject.org> - 4.2.0-3
 - Requires: PyKDE4 (for plasmascript bits)
-- solid-bluetoothTrunkTo42.diff (bug #481801), and
+- solid-bluetoothTrunkTo42.diff (bug #481801), and 
   +Provides: solid-bluetooth(-devel) = 4.3
 
 * Wed Jan 28 2009 Than Ngo <than@redhat.com> - 4.2.0-2
@@ -2775,7 +2720,7 @@ fi
 - BR: google-gadgets-devel > 0.10.5
 
 * Fri Jan 09 2009 Than Ngo <than@redhat.com> - 4.1.96-2
-- remove Provides: plasma-devel
+- remove Provides: plasma-devel  
 
 * Wed Jan 07 2009 Than Ngo <than@redhat.com> - 4.1.96-1
 - 4.2rc1
